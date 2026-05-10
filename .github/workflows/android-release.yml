@@ -1,9 +1,13 @@
 name: Android Release APK
 
 on:
+  # Build & release on every push to any branch — one tagged GitHub Release
+  # per commit, with a timestamped APK attached.
   push:
-    branches:
-      - "claude/build-android-apk-release-**"
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
 
 permissions:

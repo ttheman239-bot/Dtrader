@@ -30,5 +30,6 @@ APK output: `app/build/outputs/apk/release/app-release.apk`
 ## CI / Releases
 
 The `Android Release APK` GitHub Actions workflow builds a release APK on
-every push to `claude/build-android-apk-release-*` and on manual dispatch,
-then publishes a GitHub Release with the APK attached.
+**every push to any branch** (and on manual dispatch), then publishes a
+new GitHub Release with the APK attached. Markdown / `.gitignore` / `LICENSE`
+changes are skipped so doc edits don't burn build minutes.
