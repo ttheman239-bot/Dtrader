@@ -9,8 +9,8 @@ The app is a structured, opinionated playbook built around three phases:
 3. **Phase 3 — Execution** — VWAP reclaim setup, scenario playbooks (AI Infra Day, Power Rotation), hard rules.
 4. **Tools** — quick-access cheat sheet (TradingView, Finviz, Benzinga, TrendForce, Earnings Whispers, macro quick look).
 
-Built with **Kotlin + Jetpack Compose + Material 3**. Dark, trading-desk
-inspired theme.
+Built with **Kotlin + Jetpack Compose + Material 3**. Targets **Android 15
+(API 35)**, runs on Android 7.0+. Dark, trading-desk inspired theme.
 
 ## Install
 
