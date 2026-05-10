@@ -2,12 +2,13 @@
 
 Android companion app for the **AI + Power + Infra** day-trading workflow.
 
-The app is a structured, opinionated playbook built around three phases:
+The app is a structured, opinionated playbook with a real-time flow analyser:
 
-1. **Phase 1 — Pre-Market** — futures + yields, sector flow, catalysts, premarket movers.
-2. **Phase 2 — Open** — relative-strength ranking against a curated AI / Power watchlist with one-tap deep links to TradingView and Finviz.
-3. **Phase 3 — Execution** — VWAP reclaim setup, scenario playbooks (AI Infra Day, Power Rotation), hard rules.
-4. **Tools** — quick-access cheat sheet (TradingView, Finviz, Benzinga, TrendForce, Earnings Whispers, macro quick look).
+1. **Flow** — *real-time*. Pulls live quotes from Yahoo Finance, computes a market-regime read (Risk-On / AI-Infra / Power / Mixed / Risk-Off), ranks sector ETFs, and orders the watchlist by relative strength vs SPY. Auto-refresh every 30s.
+2. **Phase 1 — Pre-Market** — futures + yields, sector flow, catalysts, premarket movers.
+3. **Phase 2 — Open** — relative-strength ranking against a curated AI / Power watchlist with one-tap deep links to TradingView and Finviz.
+4. **Phase 3 — Execution** — VWAP reclaim setup, scenario playbooks (AI Infra Day, Power Rotation), hard rules.
+5. **Tools** — quick-access cheat sheet (TradingView, Finviz, Benzinga, TrendForce, Earnings Whispers, macro quick look).
 
 Built with **Kotlin + Jetpack Compose + Material 3**. Targets **Android 15
 (API 35)**, runs on Android 7.0+. Dark, trading-desk inspired theme.
