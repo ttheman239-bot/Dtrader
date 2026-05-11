@@ -78,6 +78,22 @@ class QuoteApi {
             volList.dropLast(1).filter { it > 0 }.average().toLong()
         } else 0L
 
+        // Trailing returns from daily closes (Yahoo returns ~63 daily bars
+        // for range=3mo). Skip nulls (Yahoo emits JSONObject.NULL for halts).
+        val closesArr = quoteObj?.optJSONArray("close")
+        val closes = mutableListOf<Double>()
+        if (closesArr != null) {
+            for (i in 0 until closesArr.length()) {
+                val v = closesArr.opt(i)
+                if (v is Number) {
+                    val d = v.toDouble()
+                    if (!d.isNaN()) closes += d
+                }
+            }
+        }
+        val fiveDay = nDayReturn(closes, 5)
+        val twentyDay = nDayReturn(closes, 20)
+
         return Quote(
             symbol = symbol,
             price = price,
@@ -89,7 +105,16 @@ class QuoteApi {
             premarketPct = preMarketPct,
             postmarketPrice = postMarketPrice,
             postmarketPct = postMarketPct,
+            fiveDayReturn = fiveDay,
+            twentyDayReturn = twentyDay,
         )
+    }
+
+    private fun nDayReturn(closes: List<Double>, n: Int): Double {
+        if (closes.size <= n) return 0.0
+        val last = closes.last()
+        val past = closes[closes.size - 1 - n]
+        return if (past > 0) (last - past) / past * 100.0 else 0.0
     }
 
     private fun JSONObject.optDoubleOrNull(key: String): Double? {

@@ -37,11 +37,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import com.dtrader.app.data.Bias
+import com.dtrader.app.data.AvoidEntry
+import com.dtrader.app.data.FuturesYieldRow
+import com.dtrader.app.data.LeaderRead
 import com.dtrader.app.data.MarketSession
 import com.dtrader.app.data.MasterPlan
 import com.dtrader.app.data.MasterPlanRepository
-import com.dtrader.app.data.PickReading
+import com.dtrader.app.data.RegimeKind
+import com.dtrader.app.data.SectorFlowRow
+import com.dtrader.app.data.WatchlistEntry
 import com.dtrader.app.data.WorkflowData
 import com.dtrader.app.ui.components.CheckItem
 import com.dtrader.app.ui.components.DCard
@@ -92,11 +96,7 @@ fun MasterPlanScreen(modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        TopBar(
-            state = state,
-            refreshing = refreshing,
-            onRefresh = { scope.launch { refresh() } },
-        )
+        TopBar(state, refreshing) { scope.launch { refresh() } }
         when (val s = state) {
             MasterUi.Loading -> Loading()
             is MasterUi.Error -> ErrorBlock(s.message) { refreshTick++ }
@@ -114,20 +114,18 @@ private fun TopBar(state: MasterUi, refreshing: Boolean, onRefresh: () -> Unit) 
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "เกมเช้านี้ — MASTER PLAN",
+                "เกมเช้านี้ — INSTITUTIONAL FLOW",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            val sessionLine = plan?.let { "${sessionLabel(it.session)} · ${it.nyTimestamp}" }
-                ?: "กำลังโหลดข้อมูล…"
             Text(
-                text = sessionLine,
+                plan?.let { "${sessionLabel(it.session)} · ${it.nyTimestamp}" } ?: "กำลังโหลด…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (plan != null) {
                 Text(
-                    text = "อัปเดต ${formatTime(plan.asOfMillis)} · auto refresh 30s",
+                    "อัปเดต ${formatTime(plan.asOfMillis)} · auto refresh 30s",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -142,11 +140,7 @@ private fun TopBar(state: MasterUi, refreshing: Boolean, onRefresh: () -> Unit) 
             Spacer(Modifier.width(8.dp))
         }
         IconButton(onClick = onRefresh) {
-            Icon(
-                Icons.Filled.Refresh,
-                contentDescription = "Refresh",
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -158,7 +152,7 @@ private fun Loading() {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
             Text(
-                "วิเคราะห์ตลาด — กำลังโหลด real-time flow",
+                "วิเคราะห์ตลาด — institutional flow",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -170,17 +164,9 @@ private fun Loading() {
 private fun ErrorBlock(message: String, onRetry: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "ดึงข้อมูล quote ไม่สำเร็จ",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
+            Text("ดึงข้อมูลไม่สำเร็จ", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(8.dp))
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
             Box(
                 modifier = Modifier
@@ -188,9 +174,7 @@ private fun ErrorBlock(message: String, onRetry: () -> Unit) {
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                     .clickable { onRetry() }
                     .padding(horizontal = 18.dp, vertical = 10.dp),
-            ) {
-                Text("ลองใหม่ / Retry", color = MaterialTheme.colorScheme.primary)
-            }
+            ) { Text("ลองใหม่ / Retry", color = MaterialTheme.colorScheme.primary) }
         }
     }
 }
@@ -203,22 +187,23 @@ private fun Content(plan: MasterPlan) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { SessionBanner(plan) }
-        item { BiasCard(plan) }
-        if (plan.sessionMovers.isNotEmpty()) {
-            item { MoversCard(plan) }
-        }
-        item { TierCard(title = "Tier S — Highest Conviction", color = BullGreen, picks = plan.tierS) }
-        if (plan.tierA.isNotEmpty()) {
-            item { TierCard(title = "Tier A — รองลงมา", color = InfoBlue, picks = plan.tierA) }
-        }
+        item { RegimeCard(plan) }
+        item { FuturesYieldsCard(plan) }
+        item { SectorFlowCard(plan) }
+        item { LeadersCard(plan) }
+        item { RotationCard(plan) }
+        item { ExpectationCard(plan) }
+        item { OpeningWatchlistCard(plan) }
+        if (plan.avoidList.isNotEmpty()) item { AvoidListCard(plan) }
+        item { FinalConclusionCard(plan) }
         item { RulesCard(plan) }
         item { RoutineCard(plan) }
         item { MantraCard(plan) }
         item {
             Text(
-                "ข้อมูล quote จาก Yahoo Finance public chart API · " +
-                    "RS = ticker% − SPY% · RelVol = today / 3-month avg · " +
-                    "Refresh ทุก 30 วินาที. ไม่ใช่คำแนะนำการลงทุน",
+                "Data: Yahoo Finance public chart API (regular + pre/post). " +
+                    "RS = ticker% − SPY%. 5D/20D = trailing daily-bar returns. " +
+                    "Refresh 30s · ไม่ใช่คำแนะนำการลงทุน",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
@@ -227,179 +212,347 @@ private fun Content(plan: MasterPlan) {
     }
 }
 
+// ---------------- Section cards ----------------
+
 @Composable
 private fun SessionBanner(plan: MasterPlan) {
     val (color, narrative) = when (plan.session) {
-        MarketSession.PREMARKET -> InfoBlue to
-            "Pre-market — ดูเงินไหลก่อนเปิด, lock watchlist, รอ trigger"
-        MarketSession.REGULAR -> BullGreen to
-            "ตลาดเปิด — RS ranking + VWAP reclaim เท่านั้น"
-        MarketSession.POSTMARKET -> WarnAmber to
-            "หลังตลาดปิด — เน้น earnings movers, ลด size"
-        MarketSession.CLOSED -> Accent to
-            "ตลาดปิด — เตรียม watchlist, อ่าน narrative คืนนี้"
+        MarketSession.PREMARKET -> InfoBlue to "Pre-market — ดูเงินไหลก่อนเปิด, lock watchlist"
+        MarketSession.REGULAR -> BullGreen to "ตลาดเปิด — RS ranking + VWAP reclaim เท่านั้น"
+        MarketSession.POSTMARKET -> WarnAmber to "หลังตลาดปิด — เน้น earnings movers"
+        MarketSession.CLOSED -> Accent to "ตลาดปิด — เตรียม watchlist + อ่าน narrative"
     }
-    DCard(title = "Session ปัจจุบัน · ${sessionLabel(plan.session)}", accent = color) {
-        Text(
-            text = narrative,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "นาฬิกานิวยอร์ก: ${plan.nyTimestamp}",
+    DCard(title = "Session · ${sessionLabel(plan.session)}", accent = color) {
+        Text(narrative, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(4.dp))
+        Text("นาฬิกานิวยอร์ก: ${plan.nyTimestamp}",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun BiasCard(plan: MasterPlan) {
-    val color = biasColor(plan.bias.bias)
-    DCard(title = "Where money is flowing · เงินไหลไปไหน", accent = color) {
-        Pill(text = plan.bias.bias.labelTh, color = color)
+private fun RegimeCard(plan: MasterPlan) {
+    val color = regimeColor(plan.regime.kind)
+    DCard(title = "1 · Market Regime", accent = color) {
+        Pill(text = plan.regime.nameTh, color = color)
         Spacer(Modifier.height(10.dp))
-        Text(
-            plan.bias.headlineTh,
+        Text(plan.regime.nameTh,
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            plan.bias.headlineEn,
+            color = MaterialTheme.colorScheme.onSurface)
+        Text(plan.regime.nameEn,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
-        Text(
-            plan.bias.detailTh,
+        Text(plan.regime.whyTh,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        if (plan.bias.signals.isNotEmpty()) {
+            color = MaterialTheme.colorScheme.onSurface)
+        if (plan.regime.signals.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            SignalGrid(plan.bias.signals)
+            SignalGrid(plan.regime.signals)
         }
     }
 }
 
 @Composable
-private fun SignalGrid(signals: List<String>) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        signals.chunked(2).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                row.forEach { label ->
-                    Box(modifier = Modifier.weight(1f)) {
-                        Pill(text = label, color = signalColor(label))
-                    }
-                }
-                if (row.size == 1) Box(modifier = Modifier.weight(1f)) {}
+private fun FuturesYieldsCard(plan: MasterPlan) {
+    DCard(title = "Futures + Yields", accent = InfoBlue) {
+        if (plan.futuresYields.isEmpty()) {
+            Text("ดึงข้อมูล futures/macro ไม่ครบ",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            plan.futuresYields.forEach { FuturesRow(it) }
+        }
+    }
+}
+
+@Composable
+private fun FuturesRow(row: FuturesYieldRow) {
+    val color = if (row.pctChange >= 0) BullGreen else BearRed
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(row.labelTh, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            if (row.interpretationTh.isNotEmpty()) {
+                Text(row.interpretationTh,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        Text(formatPct(row.pctChange), style = MaterialTheme.typography.titleMedium, color = color)
     }
 }
 
 @Composable
-private fun MoversCard(plan: MasterPlan) {
+private fun SectorFlowCard(plan: MasterPlan) {
+    DCard(title = "2 · Sector Flow", accent = BullGreen) {
+        Text("STRONGEST",
+            style = MaterialTheme.typography.labelMedium,
+            color = BullGreen)
+        plan.strongestSectors.forEach { SectorRow(it) }
+        if (plan.weakestSectors.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text("WEAKEST",
+                style = MaterialTheme.typography.labelMedium,
+                color = BearRed)
+            plan.weakestSectors.forEach { SectorRow(it) }
+        }
+    }
+}
+
+@Composable
+private fun SectorRow(row: SectorFlowRow) {
+    val color = if (row.pctChange >= 0) BullGreen else BearRed
+    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Pill(text = row.symbol, color = color)
+            Spacer(Modifier.width(10.dp))
+            Text(row.nameTh, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            Text(formatPct(row.pctChange), style = MaterialTheme.typography.titleMedium, color = color)
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "5D ${formatPct(row.fiveDayReturn)} · RelVol ${"%.2f".format(row.relVolume)}x · ${row.flowReadTh}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun LeadersCard(plan: MasterPlan) {
     val title = when (plan.session) {
-        MarketSession.PREMARKET -> "Pre-market money flow · ใครได้บิด"
-        MarketSession.POSTMARKET -> "Post-market movers · ใครวิ่งหลังปิด"
-        else -> "Session movers · ใครวิ่งวันนี้"
+        MarketSession.PREMARKET -> "3 · Premarket Leaders"
+        MarketSession.POSTMARKET -> "3 · Post-Market Leaders"
+        else -> "3 · Session Leaders"
     }
     DCard(title = title, accent = Accent) {
-        plan.sessionMovers.forEachIndexed { i, p ->
-            PickRow(rank = i + 1, pick = p, useSessionPct = true)
-        }
-    }
-}
-
-@Composable
-private fun TierCard(title: String, color: Color, picks: List<PickReading>) {
-    DCard(title = title, accent = color) {
-        if (picks.isEmpty()) {
-            Text(
-                "ยังไม่มีตัวเลือก — รอข้อมูล",
+        if (plan.leaders.isEmpty()) {
+            Text("ยังไม่มี leader ที่ชัด — รอ flow",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@DCard
         }
-        picks.forEachIndexed { i, p ->
-            PickRow(rank = i + 1, pick = p, useSessionPct = false)
-            if (p.reasonsTh.isNotEmpty()) {
-                Column(modifier = Modifier.padding(start = 46.dp, top = 2.dp, bottom = 10.dp)) {
-                    p.reasonsTh.forEach { r ->
-                        Text(
-                            "• $r",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+        plan.leaders.forEachIndexed { i, l ->
+            LeaderBlock(rank = i + 1, leader = l)
+            if (i != plan.leaders.lastIndex) {
+                Spacer(Modifier.height(10.dp))
             }
         }
     }
 }
 
 @Composable
-private fun PickRow(rank: Int, pick: PickReading, useSessionPct: Boolean) {
+private fun LeaderBlock(rank: Int, leader: LeaderRead) {
     val context = LocalContext.current
-    val displayPct = if (useSessionPct) pick.sessionPct else pick.regularPct
-    val color = if (displayPct >= 0) BullGreen else BearRed
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    val color = if (leader.sessionPct >= 0) BullGreen else BearRed
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .clickable {
-                val url = WorkflowData.tradingViewUrl(pick.ticker.symbol)
-                context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, WorkflowData.tradingViewUrl(leader.ticker.symbol).toUri())
+                )
             }
-            .padding(vertical = 8.dp, horizontal = 4.dp),
+            .padding(12.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .width(28.dp)
-                .height(28.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("#$rank", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp).height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center,
+            ) { Text("#$rank", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+            Spacer(Modifier.width(10.dp))
+            Pill(text = leader.ticker.symbol, color = color)
+            Spacer(Modifier.width(10.dp))
+            Text(leader.ticker.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            Text(formatPct(leader.sessionPct), style = MaterialTheme.typography.titleMedium, color = color)
         }
-        Spacer(Modifier.width(10.dp))
-        Pill(text = pick.ticker.symbol, color = color)
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                pick.ticker.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                "Score ${"%.1f".format(pick.score)} · RS ${formatPct(pick.rsVsSpy)} · " +
-                    "RelVol ${"%.2f".format(pick.relVolume)}x",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Spacer(Modifier.height(8.dp))
+        LeaderLine("Narrative", leader.narrativeTh)
+        LeaderLine("Relative strength", leader.relativeStrengthTh)
+        LeaderLine("Liquidity", leader.liquidityTh)
+        LeaderLine("Catalyst", leader.catalystTh)
+        LeaderLine("Institutional read", leader.institutionalTh)
+        LeaderLine("Sustainable?", leader.sustainableTh)
+        LeaderLine("Crowding", leader.crowdingTh)
+    }
+}
+
+@Composable
+private fun LeaderLine(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(
-            formatPct(displayPct),
-            style = MaterialTheme.typography.titleMedium,
-            color = color,
+            label,
+            modifier = Modifier.width(120.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
         )
+        Text(
+            value,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun RotationCard(plan: MasterPlan) {
+    DCard(title = "4 · Narrative Rotation", accent = WarnAmber) {
+        Text(
+            plan.rotation.arrowTh,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(plan.rotation.whyTh, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(8.dp))
+        Row {
+            Pill(text = "Stage: ${plan.rotation.stageTh}", color = InfoBlue)
+            Spacer(Modifier.width(8.dp))
+            Pill(text = "Driver: ${plan.rotation.driverTh}", color = Accent)
+        }
+    }
+}
+
+@Composable
+private fun ExpectationCard(plan: MasterPlan) {
+    DCard(title = "5 · Expectation vs Reality", accent = InfoBlue) {
+        Text("Crowded / over-owned",
+            style = MaterialTheme.typography.labelMedium,
+            color = BearRed)
+        if (plan.expectation.crowdedTh.isEmpty()) {
+            Text("— ไม่พบสัญญาณ crowded ชัดเจน",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp))
+        } else {
+            plan.expectation.crowdedTh.forEach {
+                Text("• $it",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Under-owned / hidden strength",
+            style = MaterialTheme.typography.labelMedium,
+            color = BullGreen)
+        if (plan.expectation.underOwnedTh.isEmpty()) {
+            Text("— ไม่พบสัญญาณ under-owned breakout",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp))
+        } else {
+            plan.expectation.underOwnedTh.forEach {
+                Text("• $it",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(plan.expectation.expectationGapTh,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun OpeningWatchlistCard(plan: MasterPlan) {
+    DCard(title = "6 · Opening Watchlist (≤ 3 names)", accent = BullGreen) {
+        if (plan.openingWatchlist.isEmpty()) {
+            Text("ยังไม่มี setup ผ่านคุณภาพ — ถือเงินสด",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@DCard
+        }
+        plan.openingWatchlist.forEachIndexed { i, w ->
+            WatchlistBlock(rank = i + 1, entry = w)
+            if (i != plan.openingWatchlist.lastIndex) Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+@Composable
+private fun WatchlistBlock(rank: Int, entry: WatchlistEntry) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .clickable {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, WorkflowData.tradingViewUrl(entry.ticker.symbol).toUri())
+                )
+            }
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp).height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center,
+            ) { Text("#$rank", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+            Spacer(Modifier.width(10.dp))
+            Pill(text = entry.ticker.symbol, color = BullGreen)
+            Spacer(Modifier.width(10.dp))
+            Text(entry.ticker.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface)
+        }
+        Spacer(Modifier.height(8.dp))
+        LeaderLine("Why", entry.whyTh)
+        LeaderLine("Confirms", entry.confirmsTh)
+        LeaderLine("Invalidates", entry.invalidatesTh)
+        LeaderLine("Institutional", entry.institutionalLooksLikeTh)
+        LeaderLine("Entry style", entry.entryStyleTh)
+    }
+}
+
+@Composable
+private fun AvoidListCard(plan: MasterPlan) {
+    DCard(title = "7 · Avoid List · กับดักวันนี้", accent = BearRed) {
+        plan.avoidList.forEach { AvoidRow(it) }
+    }
+}
+
+@Composable
+private fun AvoidRow(entry: AvoidEntry) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+        Pill(text = entry.symbol, color = BearRed)
+        Spacer(Modifier.width(10.dp))
+        Text(entry.reasonTh,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun FinalConclusionCard(plan: MasterPlan) {
+    DCard(title = "Final Conclusion · สรุปวันนี้", accent = Accent) {
+        Pill(text = plan.finalConclusion.dayTypeTh, color = regimeColor(plan.regime.kind))
+        Spacer(Modifier.height(8.dp))
+        LeaderLine("Dominant flow", plan.finalConclusion.dominantFlowTh)
+        LeaderLine("Dominant narrative", plan.finalConclusion.dominantNarrativeTh)
+        LeaderLine("Institutional behavior", plan.finalConclusion.likelyInstitutionalBehaviorTh)
     }
 }
 
 @Composable
 private fun RulesCard(plan: MasterPlan) {
-    DCard(title = "กฎการเทรดวันนี้ · Today's Rules", accent = BearRed) {
-        plan.rulesTh.forEachIndexed { i, rule ->
-            CheckItem(text = rule, index = i + 1)
-        }
+    DCard(title = "Rules วันนี้", accent = BearRed) {
+        plan.rulesTh.forEachIndexed { i, r -> CheckItem(text = r, index = i + 1) }
     }
 }
 
@@ -407,10 +560,7 @@ private fun RulesCard(plan: MasterPlan) {
 private fun RoutineCard(plan: MasterPlan) {
     DCard(title = "Daily Routine (ET)", accent = InfoBlue) {
         plan.routine.forEach { step ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
                 Box(
                     modifier = Modifier
                         .width(110.dp)
@@ -418,30 +568,14 @@ private fun RoutineCard(plan: MasterPlan) {
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
-                    Text(
-                        step.timeLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Text(step.timeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        step.titleTh,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        step.titleEn,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(step.titleTh, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(step.titleEn, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(2.dp))
-                    Text(
-                        step.detailTh,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                    Text(step.detailTh, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -450,24 +584,40 @@ private fun RoutineCard(plan: MasterPlan) {
 
 @Composable
 private fun MantraCard(plan: MasterPlan) {
-    DCard(title = "Mantra วันนี้", accent = Accent) {
-        Text(
-            "“${plan.mantraTh}”",
+    DCard(title = "Mantra", accent = Accent) {
+        Text("“${plan.mantraTh}”",
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+            color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
-private fun sessionLabel(s: MarketSession) =
-    "${s.labelTh} · ${s.labelEn}"
+// ---------------- Helpers ----------------
 
-private fun biasColor(b: Bias): Color = when (b) {
-    Bias.AI_INFRA -> InfoBlue
-    Bias.POWER -> WarnAmber
-    Bias.RISK_ON -> BullGreen
-    Bias.MIXED -> Accent
-    Bias.RISK_OFF -> BearRed
+@Composable
+private fun SignalGrid(signals: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        signals.chunked(2).forEach { row ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { label ->
+                    Box(modifier = Modifier.weight(1f)) { Pill(text = label, color = signalColor(label)) }
+                }
+                if (row.size == 1) Box(modifier = Modifier.weight(1f)) {}
+            }
+        }
+    }
+}
+
+private fun sessionLabel(s: MarketSession) = "${s.labelTh} · ${s.labelEn}"
+
+private fun regimeColor(k: RegimeKind): Color = when (k) {
+    RegimeKind.AI_ACCELERATION, RegimeKind.AI_CONSOLIDATION -> InfoBlue
+    RegimeKind.POWER_BOTTLENECK -> WarnAmber
+    RegimeKind.BROAD_MOMENTUM -> BullGreen
+    RegimeKind.SELECTIVE_ROTATION -> Accent
+    RegimeKind.DEFENSIVE_FLOW -> WarnAmber
+    RegimeKind.CROWDED_EUPHORIC -> WarnAmber
+    RegimeKind.FRAGILE -> BearRed
+    RegimeKind.LIQUIDITY_SQUEEZE, RegimeKind.RISK_OFF -> BearRed
 }
 
 private fun signalColor(label: String): Color = when {
@@ -477,6 +627,7 @@ private fun signalColor(label: String): Color = when {
     label.contains("US10Y") -> InfoBlue
     label.contains("DXY") && label.contains("+") -> WarnAmber
     label.contains("DXY") -> InfoBlue
+    label.contains("Breadth") -> InfoBlue
     label.contains("+") -> BullGreen
     else -> BearRed
 }
