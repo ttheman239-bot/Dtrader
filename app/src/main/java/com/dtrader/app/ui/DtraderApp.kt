@@ -2,10 +2,10 @@ package com.dtrader.app.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -25,23 +25,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.dtrader.app.ui.screens.FlowScreen
+import com.dtrader.app.ui.screens.MasterPlanScreen
 import com.dtrader.app.ui.screens.Phase1Screen
-import com.dtrader.app.ui.screens.Phase2Screen
 import com.dtrader.app.ui.screens.Phase3Screen
 import com.dtrader.app.ui.screens.ToolsScreen
 
 private enum class Tab(val title: String, val short: String, val icon: ImageVector) {
-    Flow("Real-Time Flow", "Flow", Icons.Filled.TrendingUp),
-    Phase1("Phase 1 — Pre-Market", "Pre-Mkt", Icons.Filled.Dashboard),
-    Phase2("Phase 2 — Open", "Open", Icons.Filled.AutoGraph),
-    Phase3("Phase 3 — Execution", "Execute", Icons.Filled.Insights),
-    Tools("Tools", "Tools", Icons.Filled.Link),
+    Master("Master Plan · เกมเช้านี้", "Master", Icons.Filled.Star),
+    Flow("Real-Time Flow · เงินไหล", "Flow", Icons.Filled.TrendingUp),
+    Phase1("Pre-Market · เตรียมตัว", "Pre-Mkt", Icons.Filled.Dashboard),
+    Phase3("Execution · เข้าออเดอร์", "Execute", Icons.Filled.Insights),
+    Tools("Tools · เครื่องมือ", "Tools", Icons.Filled.Link),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DtraderApp() {
-    var selected by remember { mutableStateOf(Tab.Flow) }
+    var selected by remember { mutableStateOf(Tab.Master) }
 
     Scaffold(
         topBar = {
@@ -75,9 +75,9 @@ fun DtraderApp() {
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         when (selected) {
+            Tab.Master -> MasterPlanScreen(Modifier.padding(padding))
             Tab.Flow -> FlowScreen(Modifier.padding(padding))
             Tab.Phase1 -> Phase1Screen(Modifier.padding(padding))
-            Tab.Phase2 -> Phase2Screen(Modifier.padding(padding))
             Tab.Phase3 -> Phase3Screen(Modifier.padding(padding))
             Tab.Tools -> ToolsScreen(Modifier.padding(padding))
         }

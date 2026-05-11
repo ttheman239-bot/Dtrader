@@ -55,6 +55,13 @@ class QuoteApi {
 
         val pct = (price - prevClose) / prevClose * 100.0
 
+        val preMarketPrice = meta.optDoubleOrNull("preMarketPrice")
+        val preMarketPct = meta.optDoubleOrNull("preMarketChangePercent")
+            ?: preMarketPrice?.let { (it - prevClose) / prevClose * 100.0 }
+        val postMarketPrice = meta.optDoubleOrNull("postMarketPrice")
+        val postMarketPct = meta.optDoubleOrNull("postMarketChangePercent")
+            ?: postMarketPrice?.let { (it - prevClose) / prevClose * 100.0 }
+
         val quoteObj = result.optJSONObject("indicators")
             ?.optJSONArray("quote")
             ?.optJSONObject(0)
@@ -78,7 +85,17 @@ class QuoteApi {
             pctChange = pct,
             volume = todayVol,
             avgVolume = avgVol,
+            premarketPrice = preMarketPrice,
+            premarketPct = preMarketPct,
+            postmarketPrice = postMarketPrice,
+            postmarketPct = postMarketPct,
         )
+    }
+
+    private fun JSONObject.optDoubleOrNull(key: String): Double? {
+        if (!has(key) || isNull(key)) return null
+        val v = optDouble(key, Double.NaN)
+        return if (v.isNaN()) null else v
     }
 
     private companion object {
