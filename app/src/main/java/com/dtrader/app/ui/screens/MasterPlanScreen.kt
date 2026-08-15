@@ -282,7 +282,7 @@ private fun FuturesRow(row: FuturesYieldRow) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Text(formatPct(row.pctChange), style = MaterialTheme.typography.titleMedium, color = color)
+        Text(row.formattedChange, style = MaterialTheme.typography.titleMedium, color = color)
     }
 }
 
