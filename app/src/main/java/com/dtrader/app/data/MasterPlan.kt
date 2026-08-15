@@ -46,7 +46,8 @@ data class MarketRegime(
 data class FuturesYieldRow(
     val labelTh: String,
     val labelEn: String,
-    val pctChange: Double,
+    val pctChange: Double,        // for sign / colour only
+    val formattedChange: String,  // "+0.42%" for pct, "+5.0 bps" for TNX
     val interpretationTh: String,
 )
 
@@ -188,7 +189,7 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
                     pctChange = q.pctChange,
                     fiveDayReturn = q.fiveDayReturn,
                     relVolume = q.relVolume,
-                    flowReadTh = readSectorFlow(meta.symbol, q),
+                    flowReadTh = readSectorFlow(q, session),
                 )
             }
         }
@@ -234,21 +235,16 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
         val smh = quotes["SMH"]?.pctChange ?: 0.0
         val xlu = quotes["XLU"]?.pctChange ?: 0.0
         val xlk = quotes["XLK"]?.pctChange ?: 0.0
-        val xlp = quotes["XLP"]?.pctChange ?: 0.0
-        val xlv = quotes["XLV"]?.pctChange ?: 0.0
-        val xle = quotes["XLE"]?.pctChange ?: 0.0
-        val xlf = quotes["XLF"]?.pctChange ?: 0.0
-        val xly = quotes["XLY"]?.pctChange ?: 0.0
-        val xli = quotes["XLI"]?.pctChange ?: 0.0
-        val xlc = quotes["XLC"]?.pctChange ?: 0.0
         val vix = quotes["^VIX"]?.pctChange ?: 0.0
-        val tnx = quotes["^TNX"]?.pctChange ?: 0.0
+        val tnxBps = tnxBps(quotes["^TNX"])
         val dxy = quotes["DX-Y.NYB"]?.pctChange ?: 0.0
         val spy20 = quotes["SPY"]?.twentyDayReturn ?: 0.0
 
-        val all = listOf(smh, xlk, xlc, xlu, xle, xlf, xli, xly, xlv, xlp)
-        val greens = all.count { it > 0.0 }
-        val breadth = if (all.isEmpty()) 0.0 else greens.toDouble() / all.size
+        // Breadth = % of *present* sectors that are green. Missing sectors are
+        // excluded from both the numerator and denominator.
+        val sectorPcts = sectors.mapNotNull { quotes[it.symbol]?.pctChange }
+        val greens = sectorPcts.count { it > 0.0 }
+        val breadth = if (sectorPcts.isEmpty()) 0.0 else greens.toDouble() / sectorPcts.size
 
         val signals = buildList {
             add("SPY ${pct(spy)}")
@@ -256,7 +252,7 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
             add("SMH ${pct(smh)}")
             add("XLU ${pct(xlu)}")
             add("VIX ${pct(vix)}")
-            add("US10Y ${pct(tnx)}")
+            add("US10Y ${bps(tnxBps)}")
             add("DXY ${pct(dxy)}")
             add("Breadth ${"%.0f".format(breadth * 100)}%")
         }
@@ -270,7 +266,7 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
                 "SPY ติดลบ + VIX พุ่ง + breadth แคบมาก — institutions ลด exposure",
                 signals,
             )
-            vix > 5.0 && dxy > 0.3 && tnx > 1.0 -> MarketRegime(
+            vix > 5.0 && dxy > 0.3 && tnxBps > 5.0 -> MarketRegime(
                 RegimeKind.LIQUIDITY_SQUEEZE,
                 "Liquidity Squeeze",
                 "Liquidity squeeze",
@@ -298,14 +294,14 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
                 "XLU เด่นพร้อม semis ยังไม่ติดลบ — narrative bottleneck ของ AI cycle ไหลเข้า power",
                 signals,
             )
-            smh > spy + 0.4 && tnx <= 0.3 -> MarketRegime(
+            smh > spy + 0.4 && tnxBps <= 2.0 -> MarketRegime(
                 RegimeKind.AI_ACCELERATION,
                 "AI Acceleration",
                 "AI acceleration",
-                "SMH นำ SPY มาก, US10Y ไม่กดดัน — flow ไหลเข้า AI infra แรง",
+                "SMH นำ SPY มาก, 10Y yield ไม่กดดัน (${bps(tnxBps)}) — flow ไหลเข้า AI infra แรง",
                 signals,
             )
-            smh < spy && xlk > spy && abs(smh) < 0.3 -> MarketRegime(
+            smh < spy && xlk > spy && kotlin.math.abs(smh) < 0.3 -> MarketRegime(
                 RegimeKind.AI_CONSOLIDATION,
                 "Selective Rotation / AI Consolidation",
                 "Selective rotation / AI consolidation",
@@ -336,41 +332,91 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
         }
     }
 
+    /**
+     * ^TNX is 10Y yield × 10. So change in bps = (price − prevClose) × 10.
+     * (A ^TNX quote of 45.00 = 4.50% yield; a move to 45.50 = +5 bps.)
+     * Returns 0 when quote is missing so the regime tree doesn't crash.
+     */
+    private fun tnxBps(q: Quote?): Double =
+        if (q == null) 0.0 else (q.price - q.previousClose) * 10.0
+
+    private fun bps(v: Double): String =
+        if (v >= 0) "+%.1f bps".format(v) else "%.1f bps".format(v)
+
+    /**
+     * Liquidity read from relative volume. During pre-market / post-market
+     * the `volume` field reflects only the partial extended-hours session,
+     * so relVol vs 3-month regular-hours average is *always* small — we
+     * label it as partial rather than mis-classifying it as "thin".
+     */
+    private fun liquidityRead(relVol: Double, session: MarketSession): String = when (session) {
+        MarketSession.PREMARKET, MarketSession.POSTMARKET ->
+            "Extended-hours volume ${"%.2f".format(relVol)}x " +
+                "(pct vs full-day avg — partial session, ตีความอย่างระวัง)"
+        else -> when {
+            relVol >= 2.0 -> "Liquidity แรงมาก ${"%.2f".format(relVol)}x"
+            relVol >= 1.2 -> "Liquidity คุณภาพดี ${"%.2f".format(relVol)}x"
+            relVol >= 0.6 -> "Liquidity ปกติ ${"%.2f".format(relVol)}x"
+            else -> "Liquidity เบา ${"%.2f".format(relVol)}x — ระวัง spread"
+        }
+    }
+
     // ----- Futures / yields -------------------------------------------------
 
     private fun buildFuturesYields(quotes: Map<String, Quote>): List<FuturesYieldRow> =
         futuresMacroSymbols.mapNotNull { (sym, name) ->
             val q = quotes[sym] ?: return@mapNotNull null
             val pct = q.pctChange
+            val bpsMove = if (sym == "^TNX") tnxBps(q) else 0.0
+            val formatted = if (sym == "^TNX") bps(bpsMove) else pct(pct)
             val interp = when (sym) {
-                "ES=F", "NQ=F", "YM=F" -> if (pct >= 0.3) "Bullish bias — risk-on tone"
-                else if (pct >= 0.0) "Slightly bullish — wait for confirmation"
-                else if (pct >= -0.3) "Slightly soft — watch for downside follow-through"
-                else "Bearish bias — risk-off open likely"
-                "^TNX" -> if (pct <= -0.5) "Yields ลง → growth/AI ได้แต้มต่อ"
-                else if (pct >= 0.8) "Yields พุ่ง → growth/AI โดนกด"
-                else "Yields ใกล้ neutral"
-                "DX-Y.NYB" -> if (pct >= 0.3) "Dollar แข็ง → ตลาดเสี่ยงโดนกด"
-                else if (pct <= -0.3) "Dollar อ่อน → tailwind risk asset"
-                else "DXY neutral"
-                "^VIX" -> if (pct >= 5.0) "VIX bid — ระวัง vol spike"
-                else if (pct <= -3.0) "VIX อ่อน — vol นิ่ง"
-                else "VIX neutral"
-                "CL=F" -> if (pct >= 1.5) "Oil เด่น → energy bid"
-                else if (pct <= -1.5) "Oil ร่วง → growth อาจได้"
-                else "Oil neutral"
+                "ES=F", "NQ=F", "YM=F" -> when {
+                    pct >= 0.3 -> "Bullish bias — risk-on tone"
+                    pct >= 0.0 -> "Slightly bullish — wait for confirmation"
+                    pct >= -0.3 -> "Slightly soft — watch for downside follow-through"
+                    else -> "Bearish bias — risk-off open likely"
+                }
+                "^TNX" -> when {
+                    bpsMove <= -3.0 -> "Yields ลง (${bps(bpsMove)}) → growth/AI ได้แต้มต่อ"
+                    bpsMove >= 5.0 -> "Yields พุ่ง (${bps(bpsMove)}) → growth/AI โดนกด"
+                    else -> "Yields ใกล้ neutral (${bps(bpsMove)})"
+                }
+                "DX-Y.NYB" -> when {
+                    pct >= 0.3 -> "Dollar แข็ง → ตลาดเสี่ยงโดนกด"
+                    pct <= -0.3 -> "Dollar อ่อน → tailwind risk asset"
+                    else -> "DXY neutral"
+                }
+                "^VIX" -> when {
+                    pct >= 5.0 -> "VIX bid — ระวัง vol spike"
+                    pct <= -3.0 -> "VIX อ่อน — vol นิ่ง"
+                    else -> "VIX neutral"
+                }
+                "CL=F" -> when {
+                    pct >= 1.5 -> "Oil เด่น → energy bid"
+                    pct <= -1.5 -> "Oil ร่วง → growth อาจได้"
+                    else -> "Oil neutral"
+                }
                 else -> ""
             }
-            FuturesYieldRow(name, name, pct, interp)
+            // pctChange keeps sign for colour; display value is bps for TNX,
+            // plain % elsewhere.
+            FuturesYieldRow(
+                labelTh = name,
+                labelEn = name,
+                pctChange = if (sym == "^TNX") bpsMove else pct,
+                formattedChange = formatted,
+                interpretationTh = interp,
+            )
         }
 
     // ----- 2. Sector flow ---------------------------------------------------
 
-    private fun readSectorFlow(symbol: String, q: Quote): String {
+    private fun readSectorFlow(q: Quote, session: MarketSession): String {
         val todayPct = q.pctChange
         val fiveDay = q.fiveDayReturn
         val twentyDay = q.twentyDayReturn
         val relVol = q.relVolume
+        val isPartial = session == MarketSession.PREMARKET || session == MarketSession.POSTMARKET
 
         val baseTrend = when {
             fiveDay > 3.0 && twentyDay > 5.0 -> "ทิศทาง trend ขึ้นชัดทั้ง 5D และ 20D"
@@ -385,9 +431,12 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
             todayPct < -1.0 -> "วันนี้ขายแรง (${pct(todayPct)})"
             else -> "วันนี้ flat"
         }
-        val vol = if (relVol >= 1.5) " · volume เด่น ${"%.2f".format(relVol)}x"
-        else if (relVol in 0.0..0.6) " · volume เบา ${"%.2f".format(relVol)}x"
-        else ""
+        val vol = when {
+            isPartial -> " · volume ${"%.2f".format(relVol)}x (partial session)"
+            relVol >= 1.5 -> " · volume เด่น ${"%.2f".format(relVol)}x"
+            relVol in 0.0..0.6 -> " · volume เบา ${"%.2f".format(relVol)}x"
+            else -> ""
+        }
         return "$todayLabel · $baseTrend$vol"
     }
 
@@ -456,12 +505,7 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
             rs <= -1.0 -> "RS อ่อนชัด (${pct(rs)})"
             else -> "RS neutral (${pct(rs)})"
         }
-        val liquidity = when {
-            q.relVolume >= 2.0 -> "Liquidity แรงมาก ${"%.2f".format(q.relVolume)}x"
-            q.relVolume >= 1.2 -> "Liquidity คุณภาพดี ${"%.2f".format(q.relVolume)}x"
-            q.relVolume >= 0.6 -> "Liquidity ปกติ ${"%.2f".format(q.relVolume)}x"
-            else -> "Liquidity เบา ${"%.2f".format(q.relVolume)}x — ระวัง spread"
-        }
+        val liquidity = liquidityRead(q.relVolume, session)
         val catalyst = when (session) {
             MarketSession.PREMARKET ->
                 if (q.premarketPct != null && abs(q.premarketPct) >= 1.0)
@@ -583,19 +627,23 @@ class MasterPlanRepository(private val api: QuoteApi = QuoteApi()) {
         regime: RegimeKind,
         sectorRows: List<SectorFlowRow>,
     ): List<WatchlistEntry> {
-        // Score = momentum(session) + RS + volBonus + narrative + sector-confirm
+        // Score = momentum(session) + RS + volBonus + narrative + sector-confirm.
+        // Extended-hours sessions: dampen volBonus and skip the crowd penalty
+        // because relVolume is partial-day and misleading.
         val spy = quotes["SPY"]?.pctChange ?: 0.0
+        val isPartial = session == MarketSession.PREMARKET || session == MarketSession.POSTMARKET
         val scored = tickers.mapNotNull { t ->
             val q = quotes[t.symbol] ?: return@mapNotNull null
             val sp = q.sessionPct(session)
             val rs = sp - spy
-            val volBonus = ((q.relVolume - 1.0).coerceIn(-1.0, 4.0)) * 5.0
+            val volWeight = if (isPartial) 1.0 else 5.0
+            val volBonus = ((q.relVolume - 1.0).coerceIn(-1.0, 4.0)) * volWeight
             val narrative = narrativeWeight(t.theme, regime)
             val sectorSym = sectorSymbolFor(t.theme)
             val sectorMomentum = sectorRows.firstOrNull { it.symbol == sectorSym }?.pctChange ?: 0.0
             val sectorConfirm = if (sectorMomentum > 0) 4.0 else -2.0
-            // Penalise crowded extended names — institutional money avoids them on entry.
             val crowdPenalty = when {
+                isPartial -> 0.0
                 q.twentyDayReturn >= 18.0 && q.relVolume < 1.0 -> -6.0
                 q.twentyDayReturn >= 12.0 && q.relVolume < 0.8 -> -3.0
                 else -> 0.0
