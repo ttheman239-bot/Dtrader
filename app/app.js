@@ -1,0 +1,305 @@
+// คนดิจิทัล Lite — mobile shell around the DH_live mini web runtime.
+// Everything runs on-device: audio is converted to 16 kHz mono WAV in the
+// browser and handed to the WASM lip-sync engine via Module._setAudioBuffer.
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const recBtn = $('recBtn');
+const demoBtn = $('demoBtn');
+const stopBtn = $('stopBtn');
+const audioFile = $('audioFile');
+const avatarSelect = $('avatarSelect');
+const bgBtn = $('bgBtn');
+
+let audioCtx = null;
+let currentSource = null;
+let avatarUrl = null;
+let busy = false;
+
+function setStatus(text, sticky) {
+  statusEl.textContent = text || '';
+  statusEl.classList.toggle('show', !!text);
+  clearTimeout(setStatus.t);
+  if (text && !sticky) setStatus.t = setTimeout(() => setStatus(''), 3000);
+}
+
+function setReady(ready) {
+  for (const el of [recBtn, demoBtn, stopBtn, audioFile, avatarSelect]) el.disabled = !ready;
+  $('fileLbl').classList.toggle('disabled', !ready);
+}
+
+function getAudioCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// ---------- audio → 16 kHz mono 16-bit WAV ----------
+
+function decode(ctx, arrayBuffer) {
+  // Safari still needs the callback form.
+  return new Promise((resolve, reject) => ctx.decodeAudioData(arrayBuffer, resolve, reject));
+}
+
+async function resampleTo16k(audioBuffer) {
+  const rate = 16000;
+  const length = Math.max(1, Math.ceil(audioBuffer.duration * rate));
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const off = new Offline(1, length, rate);
+  const src = off.createBufferSource();
+  src.buffer = audioBuffer;
+  src.connect(off.destination);
+  src.start(0);
+  const rendered = await off.startRendering();
+  return rendered.getChannelData(0);
+}
+
+function encodeWav(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Uint8Array(buf);
+}
+
+async function toWav16k(arrayBuffer) {
+  const decoded = await decode(getAudioCtx(), arrayBuffer);
+  return encodeWav(await resampleTo16k(decoded), 16000);
+}
+
+// ---------- speak: drive the lips + play the sound ----------
+
+function feedEngine(wavBytes) {
+  const ptr = Module._malloc(wavBytes.byteLength);
+  Module.HEAPU8.set(wavBytes, ptr);
+  Module._setAudioBuffer(ptr, wavBytes.byteLength);
+  Module._free(ptr);
+}
+
+function stopSpeaking() {
+  if (currentSource) {
+    currentSource.onended = null;
+    try { currentSource.stop(); } catch (e) { /* already stopped */ }
+    currentSource = null;
+  }
+  // A short silent clip resets the mouth to closed.
+  if (window.Module && Module._setAudioBuffer) feedEngine(encodeWav(new Float32Array(1600), 16000));
+  document.body.classList.remove('speaking');
+}
+
+async function speak(arrayBuffer) {
+  stopSpeaking();
+  const ctx = getAudioCtx();
+  const wav = await toWav16k(arrayBuffer);
+  const playable = await decode(ctx, wav.slice().buffer);
+  feedEngine(wav);
+  const src = ctx.createBufferSource();
+  src.buffer = playable;
+  src.connect(ctx.destination);
+  src.onended = () => { if (currentSource === src) { currentSource = null; document.body.classList.remove('speaking'); } };
+  src.start(0);
+  currentSource = src;
+  document.body.classList.add('speaking');
+}
+
+async function speakSafely(getBuffer) {
+  if (busy) return;
+  busy = true;
+  try {
+    await speak(await getBuffer());
+  } catch (e) {
+    console.error(e);
+    setStatus('เล่นเสียงไม่ได้: ' + (e && e.message ? e.message : e));
+  } finally {
+    busy = false;
+  }
+}
+
+// ---------- controls ----------
+
+demoBtn.addEventListener('click', () => {
+  getAudioCtx();
+  speakSafely(async () => (await fetch('common/test.wav')).arrayBuffer());
+});
+
+stopBtn.addEventListener('click', stopSpeaking);
+
+audioFile.addEventListener('change', () => {
+  const f = audioFile.files[0];
+  audioFile.value = '';
+  if (!f) return;
+  getAudioCtx();
+  setStatus('กำลังเตรียมเสียง…', true);
+  speakSafely(() => f.arrayBuffer()).then(() => setStatus(''));
+});
+
+let recorder = null;
+let recChunks = [];
+let recStream = null;
+
+recBtn.addEventListener('click', async () => {
+  getAudioCtx();
+  if (recorder && recorder.state === 'recording') {
+    recorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    setStatus('เบราว์เซอร์นี้อัดเสียงไม่ได้ ลองใช้ “ไฟล์เสียง” แทน');
+    return;
+  }
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    setStatus('ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน');
+    return;
+  }
+  stopSpeaking();
+  recChunks = [];
+  recorder = new MediaRecorder(recStream);
+  recorder.ondataavailable = (ev) => { if (ev.data.size) recChunks.push(ev.data); };
+  recorder.onstop = () => {
+    recStream.getTracks().forEach((t) => t.stop());
+    recBtn.classList.remove('recording');
+    recBtn.querySelector('.lbl').textContent = 'อัดเสียง';
+    const blob = new Blob(recChunks, { type: recorder.mimeType });
+    speakSafely(() => blob.arrayBuffer());
+  };
+  recorder.start();
+  recBtn.classList.add('recording');
+  recBtn.querySelector('.lbl').textContent = 'หยุดอัด → พูด';
+  setStatus('กำลังอัด… กดอีกครั้งเพื่อให้ตัวละครพูดตาม');
+});
+
+// ---------- avatars ----------
+
+async function blobUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(res.status + ' ' + url);
+  return URL.createObjectURL(await res.blob());
+}
+
+async function switchAvatar(videoUrl, dataUrl) {
+  stopSpeaking();
+  setReady(false);
+  isPaused = true;
+  $('startMessage').style.display = 'block';
+  try {
+    await videoProcessor.init(videoUrl, dataUrl);
+    await loadCombinedData();
+    await setupVertsBuffers();
+    if (chromaKeyCanvas) {
+      chromaKeyCanvas.width = canvas_video.width;
+      chromaKeyCanvas.height = canvas_video.height;
+    }
+    isPaused = false;
+    videoProcessor.play();
+    processVideoFrames();
+  } catch (e) {
+    console.error(e);
+    setStatus('โหลดตัวละครไม่สำเร็จ');
+  } finally {
+    $('startMessage').style.display = 'none';
+    setReady(true);
+  }
+}
+
+avatarSelect.addEventListener('change', async () => {
+  const dir = avatarSelect.value;
+  try { localStorage.setItem('avatar', dir); } catch (e) { /* private mode */ }
+  const old = avatarUrl;
+  avatarUrl = await blobUrl(dir + '/01.mp4');
+  await switchAvatar(avatarUrl, dir + '/combined_data.json.gz');
+  if (old) URL.revokeObjectURL(old);
+});
+
+$('customLoad').addEventListener('click', async () => {
+  const v = $('customVideo').files[0];
+  const d = $('customData').files[0];
+  if (!v || !d) { setStatus('เลือกไฟล์ให้ครบทั้ง 2 ไฟล์'); return; }
+  $('menu').close();
+  await switchAvatar(URL.createObjectURL(v), URL.createObjectURL(d));
+});
+
+// The avatars are shot on green screen, so chroma keying always stays on;
+// this toggle only swaps the scenic backdrop for a plain one.
+let showBackdrop = true;
+
+function applyBackground() {
+  bgBtn.textContent = 'พื้นหลัง: ' + (showBackdrop ? 'เปิด' : 'ปิด');
+  document.body.classList.toggle('nobg', !showBackdrop);
+  if (showBackdrop) setupBackgroundVideo();
+  else hideBackgroundVideo();
+}
+
+bgBtn.addEventListener('click', () => {
+  showBackdrop = !showBackdrop;
+  try { localStorage.setItem('bg', showBackdrop ? '1' : '0'); } catch (e) { /* private mode */ }
+  applyBackground();
+});
+
+$('menuBtn').addEventListener('click', () => $('menu').showModal());
+
+// ---------- install (PWA) ----------
+
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  $('installBtn').hidden = false;
+});
+$('installBtn').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  $('installBtn').hidden = true;
+});
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
+}
+
+// ---------- boot ----------
+
+async function boot() {
+  setReady(false);
+  let dir = 'assets';
+  try {
+    dir = localStorage.getItem('avatar') || dir;
+    const bg = localStorage.getItem('bg');
+    if (bg !== null) showBackdrop = bg === '1';
+  } catch (e) { /* private mode */ }
+  if (![...avatarSelect.options].some((o) => o.value === dir)) dir = 'assets';
+  avatarSelect.value = dir;
+
+  try {
+    await qtLoad({
+      qt: {
+        entryFunction: window.createQtAppInstance,
+        containerElements: [$('screen')],
+      },
+    });
+    avatarUrl = await blobUrl(dir + '/01.mp4');
+    CONFIG.backgroundVideoSrc = await blobUrl('background/bg.mp4');
+    CONFIG.videoSrc = avatarUrl;
+    CONFIG.dataSrc = dir + '/combined_data.json.gz';
+    await newVideoTask();
+    applyBackground();
+    setReady(true);
+    setStatus('พร้อมแล้ว — อัดเสียงหรือเลือกไฟล์เสียงให้ตัวละครพูด');
+  } catch (e) {
+    console.error(e);
+    $('startMessage').textContent = 'เริ่มไม่สำเร็จ: เบราว์เซอร์ต้องรองรับ WebGL2 + WebAssembly';
+  }
+}
+
+boot();

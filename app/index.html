@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="คนดิจิทัล">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>คนดิจิทัล Lite</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Elements required by the vendored DH_live mini runtime (js/MiniLive2.js) -->
+  <div id="stage">
+    <video id="background_video" autoplay loop muted playsinline></video>
+    <canvas id="canvas_video"></canvas>
+    <div id="startMessage">กำลังโหลด…</div>
+  </div>
+  <canvas id="canvasEl"></canvas>
+  <canvas id="canvas_gl" width="184" height="184"></canvas>
+  <div id="screen"></div>
+  <div id="loadingSpinner"></div>
+  <div id="screen2" hidden></div>
+
+  <header id="topbar">
+    <select id="avatarSelect" aria-label="เลือกตัวละคร">
+      <option value="assets">ตัวละคร 1</option>
+      <option value="assets2">ตัวละคร 2</option>
+      <option value="assets3">ตัวละคร 3</option>
+      <option value="assets5">ตัวละคร 4</option>
+    </select>
+    <button id="bgBtn" class="chip" type="button">พื้นหลัง: เปิด</button>
+    <button id="installBtn" class="chip accent" type="button" hidden>ติดตั้ง</button>
+    <button id="menuBtn" class="chip" type="button" aria-label="เมนู">⋯</button>
+  </header>
+
+  <div id="status" role="status"></div>
+
+  <footer id="controls">
+    <button id="recBtn" class="big" type="button" disabled>
+      <span class="ico">●</span><span class="lbl">อัดเสียง</span>
+    </button>
+    <label class="big" id="fileLbl">
+      <span class="ico">♪</span><span class="lbl">ไฟล์เสียง</span>
+      <input id="audioFile" type="file" accept="audio/*,video/*" hidden disabled>
+    </label>
+    <button id="demoBtn" class="big" type="button" disabled>
+      <span class="ico">▶</span><span class="lbl">เสียงตัวอย่าง</span>
+    </button>
+    <button id="stopBtn" class="big" type="button" disabled>
+      <span class="ico">■</span><span class="lbl">หยุด</span>
+    </button>
+  </footer>
+
+  <dialog id="menu">
+    <form method="dialog">
+      <h2>ตัวละครของคุณเอง</h2>
+      <p class="hint">สร้างไฟล์ <code>01.mp4</code> และ <code>combined_data.json.gz</code> จากวิดีโอของคุณบนคอมพิวเตอร์ (ดู README) แล้วเลือกทั้งสองไฟล์ที่นี่</p>
+      <label class="row">วิดีโอ (01.mp4)<input id="customVideo" type="file" accept="video/mp4"></label>
+      <label class="row">ข้อมูล (combined_data.json.gz)<input id="customData" type="file" accept=".gz,application/gzip"></label>
+      <button id="customLoad" type="button" class="chip accent">ใช้ตัวละครนี้</button>
+      <h2>ติดตั้งบนมือถือ</h2>
+      <p class="hint"><b>Android (Chrome):</b> เมนู ⋮ → “ติดตั้งแอป” / “เพิ่มลงในหน้าจอหลัก”<br>
+      <b>iPhone (Safari):</b> ปุ่มแชร์ → “เพิ่มไปยังหน้าจอโฮม”</p>
+      <p class="hint">ใช้วิดีโอหน้าตัวเองหรือคนที่ยินยอมเท่านั้น และควรระบุว่าเป็นเนื้อหาที่สร้างด้วย AI เมื่อเผยแพร่</p>
+      <p class="hint small">ขับเคลื่อนโดย <a href="https://github.com/kleinlee/DH_live" target="_blank" rel="noopener">DH_live mini</a> (MIT) — ประมวลผลบนเครื่องทั้งหมด ไม่ส่งเสียงขึ้นเซิร์ฟเวอร์</p>
+      <button class="chip" value="close">ปิด</button>
+    </form>
+  </dialog>
+
+  <script src="js/pako.min.js"></script>
+  <script src="js/DHLiveMini.js"></script>
+  <script src="js/MiniMateLoader.js"></script>
+  <script src="js/MiniLive2.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,1 +1,61 @@
-# Dtrader
+# Dtrader — คนดิจิทัล Lite (มือถือ)
+
+แอปคนดิจิทัลแบบเบาที่ **รันบนมือถือได้เลย ไม่ต้องมี GPU ไม่ต้องมีเซิร์ฟเวอร์**
+สร้างจาก [DH_live mini](https://github.com/kleinlee/DH_live) (MIT): ใช้วิดีโอจริงสั้นๆ ของคน
+แล้วแก้แค่ปากให้ตรงกับเสียง (~39 MFLOPs ต่อเฟรม, WebAssembly + WebGL2)
+
+โค้ดแอปอยู่ในโฟลเดอร์ [`app/`](app/) เป็น PWA (ติดตั้งลงหน้าจอหลักได้ และใช้ออฟไลน์ได้หลังเปิดครั้งแรก)
+
+## ทำอะไรได้
+
+- **อัดเสียง** — กดอัด พูด แล้วกดอีกครั้ง ตัวละครจะพูดตามด้วยเสียงคุณพร้อมขยับปาก
+- **ไฟล์เสียง** — เลือกไฟล์เสียง (mp3/wav/m4a ฯลฯ หรือวิดีโอที่มีเสียง) ให้ตัวละครพูด
+- **เสียงตัวอย่าง** — ทดลองทันที
+- เปลี่ยนตัวละคร 4 แบบ, เปิด/ปิดฉากพื้นหลัง
+- **ตัวละครของคุณเอง** — เมนู ⋯ → เลือก `01.mp4` + `combined_data.json.gz` ที่สร้างจากวิดีโอของคุณ
+
+เสียงทั้งหมดแปลงเป็น WAV 16 kHz และประมวลผลในเครื่อง ไม่ได้ส่งออกไปที่ใด
+
+## ติดตั้งบนมือถือ
+
+### 1. เปิดเว็บ (ทำครั้งเดียว)
+1. ที่ GitHub ของ repo นี้ ไปที่ **Settings → Pages → Build and deployment → Source: GitHub Actions**
+2. push ไปที่ `main` (หรือกด Run workflow ที่ **Actions → Deploy app to GitHub Pages**)
+3. แอปจะอยู่ที่ `https://<ชื่อผู้ใช้>.github.io/Dtrader/`
+
+> ต้องเปิดผ่าน **HTTPS** (GitHub Pages ใช้ HTTPS อยู่แล้ว) ไมโครโฟนและการติดตั้งแอปถึงจะทำงาน
+
+### 2. ติดตั้งลงมือถือ
+- **Android (Chrome):** เปิดลิงก์ → กดปุ่ม **ติดตั้ง** ที่มุมบน หรือเมนู ⋮ → *ติดตั้งแอป*
+- **iPhone (Safari, iOS 17+):** เปิดลิงก์ → ปุ่มแชร์ → *เพิ่มไปยังหน้าจอโฮม*
+
+### ทดสอบในเครื่อง
+```bash
+cd app && python3 -m http.server 8000
+# เปิด http://localhost:8000 (หรือ IP ของคอมจากมือถือ — ไมค์ต้องใช้ HTTPS ยกเว้น localhost)
+```
+
+## สร้างตัวละครจากวิดีโอของคุณ (ทำบนคอมพิวเตอร์)
+
+ใช้วิดีโอหน้าตรง พูดหรือนิ่งเล็กน้อย ยาว ~5–15 วินาที (ฉากเขียวจะได้ผลดีที่สุด)
+
+```bash
+git clone https://github.com/kleinlee/DH_live && cd DH_live
+conda create -n dh_live python=3.11 && conda activate dh_live
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # หรือรุ่น CUDA
+pip install -r requirements.txt
+# ดาวน์โหลดโมเดลลงโฟลเดอร์ checkpoint/ ตามลิงก์ใน README ของ DH_live
+python data_preparation_mini.py my_video.mp4 video_data/me --matting
+python data_preparation_web.py video_data/me
+```
+ได้ไฟล์ใน `video_data/me/assets/` → ส่ง `01.mp4` และ `combined_data.json.gz` เข้ามือถือ
+แล้วเลือกในเมนู ⋯ ของแอป หรือจะใส่เป็นตัวละครถาวรก็วางไว้ที่ `app/assets6/` แล้วเพิ่ม `<option>` ใน `app/index.html`
+
+## ข้อจำกัด
+- ความละเอียดบริเวณปาก 184px — ดีพอบนจอมือถือ แต่ไม่คมเท่า MuseTalk/LiveTalking ที่ใช้ GPU
+- ท่าทางจะวนตามคลิปต้นฉบับ
+- ยังไม่มีพิมพ์ข้อความ→เสียง (TTS) ในตัว ให้ใช้เสียงอัดหรือไฟล์เสียงจากแอป TTS อื่น
+- ตัวละครตัวอย่างมีลายน้ำ MatesX (ดู [app/NOTICE.md](app/NOTICE.md))
+
+## ข้อควรระวัง
+ใช้วิดีโอหน้าตัวเองหรือคนที่ยินยอมเท่านั้น และระบุว่าเป็นเนื้อหาที่สร้างด้วย AI เมื่อเผยแพร่ตามกฎของแพลตฟอร์ม
