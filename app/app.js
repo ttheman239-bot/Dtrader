@@ -109,6 +109,7 @@ async function speak(arrayBuffer) {
   src.start(0);
   currentSource = src;
   document.body.classList.add('speaking');
+  poseCutSoon();
 }
 
 async function speakSafely(getBuffer) {
@@ -286,6 +287,68 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:' && !inApk) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
 }
 
+// ---------- pose shuffling ----------
+// The body motion comes from the avatar's source video. Instead of looping it
+// in order, jump to random points (with a short crossfade) so the sequence of
+// poses/gestures never repeats the same way. Cuts come faster while speaking.
+// The longer and more varied the source video, the better this works.
+
+const fadeCanvas = $('canvas_fade');
+const fadeCtx = fadeCanvas.getContext('2d');
+let poseShuffle = true;
+let poseTimer = null;
+const recentStarts = [];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function schedulePoseCut(delaySec) {
+  clearTimeout(poseTimer);
+  if (!poseShuffle) return;
+  const speaking = document.body.classList.contains('speaking');
+  const hold = delaySec != null ? delaySec : (speaking ? rand(1.6, 3.2) : rand(4, 8));
+  poseTimer = setTimeout(poseCut, hold * 1000);
+}
+
+function poseCutSoon() { schedulePoseCut(rand(0.15, 0.5)); }
+
+function crossfade() {
+  if (!canvas_video.width) return;
+  fadeCanvas.width = canvas_video.width;
+  fadeCanvas.height = canvas_video.height;
+  fadeCtx.clearRect(0, 0, fadeCanvas.width, fadeCanvas.height);
+  fadeCtx.drawImage(canvas_video, 0, 0);
+  fadeCanvas.style.transition = 'none';
+  fadeCanvas.style.opacity = '1';
+  void fadeCanvas.offsetWidth; // restart the transition
+  fadeCanvas.style.transition = 'opacity 280ms ease-out';
+  fadeCanvas.style.opacity = '0';
+}
+
+function poseCut() {
+  const v = videoProcessor.video;
+  if (!v || isPaused || !isFinite(v.duration) || v.duration < 3) { schedulePoseCut(); return; }
+  const span = v.duration - 0.6;
+  // Prefer a point far from where we are and from the last few jumps.
+  let t = rand(0, span);
+  for (let i = 0; i < 12; i++) {
+    const far = Math.abs(t - v.currentTime) > Math.min(2, span / 3);
+    const fresh = recentStarts.every((r) => Math.abs(r - t) > Math.min(1.2, span / 6));
+    if (far && fresh) break;
+    t = rand(0, span);
+  }
+  recentStarts.push(t);
+  if (recentStarts.length > 4) recentStarts.shift();
+  crossfade();
+  v.currentTime = t;
+  schedulePoseCut();
+}
+
+$('poseToggle').addEventListener('change', (e) => {
+  poseShuffle = e.target.checked;
+  try { localStorage.setItem('pose', poseShuffle ? '1' : '0'); } catch (err) { /* private mode */ }
+  schedulePoseCut();
+});
+
 // ---------- boot ----------
 
 // Tighter key + stronger spill removal than the DH_live defaults (less green halo).
@@ -300,6 +363,7 @@ async function boot() {
     dir = localStorage.getItem('avatar') || dir;
     const bg = localStorage.getItem('bg');
     if (bg !== null) showBackdrop = bg === '1';
+    if (localStorage.getItem('pose') === '0') poseShuffle = false;
   } catch (e) { /* private mode */ }
   if (![...avatarSelect.options].some((o) => o.value === dir)) dir = 'assets';
   avatarSelect.value = dir;
@@ -317,6 +381,8 @@ async function boot() {
     CONFIG.dataSrc = dir + '/combined_data.json.gz';
     await newVideoTask();
     applyBackground();
+    $('poseToggle').checked = poseShuffle;
+    schedulePoseCut();
     setReady(true);
     setStatus('พร้อมแล้ว — อัดเสียงหรือเลือกไฟล์เสียงให้ตัวละครพูด');
   } catch (e) {

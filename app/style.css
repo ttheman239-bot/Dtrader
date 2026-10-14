@@ -23,7 +23,8 @@ body.nobg { background: radial-gradient(circle at 50% 35%, #374151, #111827 70%)
 /* Background slightly out of focus and darker, like a portrait-mode photo. */
 #background_video { z-index: 0; object-fit: cover; filter: blur(5px) brightness(.82) saturate(.9); transform: scale(1.08); }
 /* Person anchored to the bottom edge so the cut-off body never floats mid-screen. */
-#canvas_video { z-index: 1; object-fit: contain; object-position: 50% 100%; }
+#canvas_video, #canvas_fade { z-index: 1; object-fit: contain; object-position: 50% 100%; }
+#canvas_fade { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 #stage::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.45) 100%); }
 @media (prefers-reduced-motion: reduce) { #stage > .scene { animation: none; } }
@@ -68,4 +69,6 @@ dialog h2:not(:first-child) { margin-top: 20px; }
 .hint a { color: var(--accent); }
 .row { display: flex; flex-direction: column; gap: 4px; font-size: 14px; margin-bottom: 10px; }
 .row input { font-size: 13px; color: var(--muted); max-width: 100%; }
+.row.check { flex-direction: row; align-items: center; gap: 8px; }
+.row.check input { width: 20px; height: 20px; accent-color: var(--accent); }
 dialog form > .chip { margin-top: 4px; }
