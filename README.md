@@ -18,14 +18,21 @@
 
 ## ติดตั้งบนมือถือ
 
-### 1. เปิดเว็บ (ทำครั้งเดียว)
+### Android — ไฟล์ APK (ง่ายสุด)
+ทุกครั้งที่ push, GitHub Actions (**Digital Human APK**) จะสร้าง APK และแนบไว้ในหน้า **Releases**
+(ชื่อ `digital-human-…`) → เปิดหน้านั้นบนมือถือ → ดาวน์โหลด `DigitalHumanLite-xxxxxxx.apk` →
+เปิดไฟล์ → อนุญาต “ติดตั้งแอปที่ไม่รู้จัก” → ติดตั้ง (โค้ดแอปอยู่ใน [`android/`](android/), ใช้ WebView โหลดไฟล์จาก `app/`)
+
+### เว็บแอป (Android/iPhone) ผ่าน GitHub Pages
+
+#### 1. เปิดเว็บ (ทำครั้งเดียว)
 1. ที่ GitHub ของ repo นี้ ไปที่ **Settings → Pages → Build and deployment → Source: GitHub Actions**
 2. push ไปที่ `main` (หรือกด Run workflow ที่ **Actions → Deploy app to GitHub Pages**)
 3. แอปจะอยู่ที่ `https://<ชื่อผู้ใช้>.github.io/Dtrader/`
 
 > ต้องเปิดผ่าน **HTTPS** (GitHub Pages ใช้ HTTPS อยู่แล้ว) ไมโครโฟนและการติดตั้งแอปถึงจะทำงาน
 
-### 2. ติดตั้งลงมือถือ
+#### 2. ติดตั้งลงมือถือ
 - **Android (Chrome):** เปิดลิงก์ → กดปุ่ม **ติดตั้ง** ที่มุมบน หรือเมนู ⋮ → *ติดตั้งแอป*
 - **iPhone (Safari, iOS 17+):** เปิดลิงก์ → ปุ่มแชร์ → *เพิ่มไปยังหน้าจอโฮม*
 

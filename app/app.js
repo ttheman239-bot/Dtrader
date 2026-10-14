@@ -252,6 +252,7 @@ $('menuBtn').addEventListener('click', () => $('menu').showModal());
 
 let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
+  if (location.hostname === 'appassets.androidplatform.net') return;
   e.preventDefault();
   deferredPrompt = e;
   $('installBtn').hidden = false;
@@ -264,7 +265,10 @@ $('installBtn').addEventListener('click', async () => {
   $('installBtn').hidden = true;
 });
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+// Skipped inside the Android APK: files are already bundled there, and
+// service-worker fetches would bypass the WebView asset loader.
+const inApk = location.hostname === 'appassets.androidplatform.net';
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !inApk) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
 }
 

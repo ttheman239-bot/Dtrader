@@ -2,7 +2,7 @@ name: Deploy app to GitHub Pages
 
 on:
   push:
-    branches: [main, claude/digital-human-lightweight-options-1tiigi]
+    branches: [main]
     paths: ['app/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
