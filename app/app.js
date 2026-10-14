@@ -181,6 +181,20 @@ recBtn.addEventListener('click', async () => {
 
 // ---------- avatars ----------
 
+// Android's APK packager silently un-gzips assets (combined_data.json.gz is
+// shipped as combined_data.json), so accept either form of the avatar data.
+VideoProcessor.prototype.fetchVideoUtilData = async function (url) {
+  // Inside the APK a missing asset is a network error rather than a 404.
+  if (location.hostname === 'appassets.androidplatform.net' && /^[^:]+\.gz$/.test(url)) url = url.replace(/\.gz$/, '');
+  let res = await fetch(url).catch(() => null);
+  if ((!res || !res.ok) && /\.gz$/.test(url)) res = await fetch(url.replace(/\.gz$/, ''));
+  if (!res.ok) throw new Error('โหลดข้อมูลตัวละครไม่ได้ (' + res.status + ')');
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const gzipped = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const text = gzipped ? pako.inflate(bytes, { to: 'string' }) : new TextDecoder().decode(bytes);
+  this.combinedData = JSON.parse(text);
+};
+
 async function blobUrl(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(res.status + ' ' + url);
@@ -302,7 +316,9 @@ async function boot() {
     setStatus('พร้อมแล้ว — อัดเสียงหรือเลือกไฟล์เสียงให้ตัวละครพูด');
   } catch (e) {
     console.error(e);
-    $('startMessage').textContent = 'เริ่มไม่สำเร็จ: เบราว์เซอร์ต้องรองรับ WebGL2 + WebAssembly';
+    const msg = $('startMessage');
+    msg.textContent = 'เริ่มไม่สำเร็จ: ' + (e && e.message ? e.message : 'โหลดวิดีโอ/ WebGL2 ไม่ได้');
+    msg.style.display = 'block';
   }
 }
 
