@@ -549,7 +549,7 @@ function updateMotion(dt) {
 
   // Camera: full body while sitting, walking or away from the center.
   const wantFull = e > 0.02 || motion.goal !== null || Math.abs(root.position.x) > 0.03 || motion.walkAmt > 0.1;
-  camZoom += ((wantFull ? 1 : 0) - camZoom) * Math.min(1, dt * 1.6);
+  camZoom += ((wantFull ? 1 : motion.wave > 0.05 ? 0.3 : 0) - camZoom) * Math.min(1, dt * 1.6);
   placeCamera();
 }
 
@@ -576,10 +576,10 @@ function applyLegs(sitE) {
   if (motion.wave > 0.01) {
     const t = arms.right.target;
     const wv = motion.wave;
-    t.down = THREE.MathUtils.lerp(t.down, 0.8, wv);
-    t.fwd = THREE.MathUtils.lerp(t.fwd, 0.55, wv);
+    t.down = THREE.MathUtils.lerp(t.down, 0.55, wv);
+    t.fwd = THREE.MathUtils.lerp(t.fwd, 0.7, wv);
     t.twist = THREE.MathUtils.lerp(t.twist, 1.5, wv);
-    t.elbow = THREE.MathUtils.lerp(t.elbow, 1.7, wv);
+    t.elbow = THREE.MathUtils.lerp(t.elbow, 1.9, wv);
     t.fore = THREE.MathUtils.lerp(t.fore, 0, wv);
     t.wristSide = Math.sin(state.t * 9) * 0.45 * wv;
     t.curl = [0.1, 0.02, 0.02, 0.04, 0.06];
