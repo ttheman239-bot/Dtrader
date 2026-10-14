@@ -262,6 +262,9 @@ bgBtn.addEventListener('click', () => {
 });
 
 $('menuBtn').addEventListener('click', () => $('menu').showModal());
+$('mode3dBtn').addEventListener('click', () => {
+  try { localStorage.setItem('mode', '3d'); } catch (e) { /* private mode */ }
+});
 
 // ---------- install (PWA) ----------
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <title>คนดิจิทัล 3D</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.min.js" } }
+  </script>
+</head>
+<body class="mode3d">
+  <div id="stage">
+    <div class="scene">
+      <video id="background_video" autoplay loop muted playsinline></video>
+      <canvas id="canvas3d"></canvas>
+    </div>
+    <div id="startMessage">กำลังโหลดโมเดล 3D…</div>
+  </div>
+
+  <header id="topbar">
+    <a id="videoModeBtn" class="chip" href="index.html#video">โหมดวิดีโอ</a>
+    <span class="chip static">3D · ขยับมือ/นิ้วอิสระ</span>
+    <button id="bgBtn" class="chip" type="button">พื้นหลัง: เปิด</button>
+  </header>
+
+  <div id="status" role="status"></div>
+
+  <footer id="controls">
+    <button id="recBtn" class="big" type="button" disabled>
+      <span class="ico">●</span><span class="lbl">อัดเสียง</span>
+    </button>
+    <label class="big" id="fileLbl">
+      <span class="ico">♪</span><span class="lbl">ไฟล์เสียง</span>
+      <input id="audioFile" type="file" accept="audio/*,video/*" hidden disabled>
+    </label>
+    <button id="demoBtn" class="big" type="button" disabled>
+      <span class="ico">▶</span><span class="lbl">เสียงตัวอย่าง</span>
+    </button>
+    <button id="stopBtn" class="big" type="button" disabled>
+      <span class="ico">■</span><span class="lbl">หยุด</span>
+    </button>
+  </footer>
+
+  <script type="module" src="app3d.js"></script>
+</body>
+</html>

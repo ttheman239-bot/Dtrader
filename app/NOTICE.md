@@ -13,3 +13,13 @@ Changes to those files:
 
 The sample avatars carry a "MatesX" mark. Per the DH_live README, commercial use of
 the web avatars without the mark requires authorization from matesx.com.
+
+## 3D mode
+
+- `vendor/three/` — [three.js](https://threejs.org) r170 (`three.module.min.js`,
+  `addons/loaders/GLTFLoader.js`, `addons/utils/BufferGeometryUtils.js`), MIT License.
+- `vendor/three-vrm.module.min.js` — [@pixiv/three-vrm](https://github.com/pixiv/three-vrm)
+  3.5.5, MIT License (`vendor/three-vrm.LICENSE`).
+- `models/avatar.vrm` — `VRM1_Constraint_Twist_Sample.vrm` from the three-vrm examples,
+  © 2022 pixiv Inc., [VRM Public License 1.0](https://vrm.dev/licenses/1.0/): redistribution
+  and modification allowed, commercial use allowed, credit not required.

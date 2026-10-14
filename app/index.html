@@ -13,6 +13,10 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <title>คนดิจิทัล Lite</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Reopen the mode the user was last in (3D or video).
+    try { if (localStorage.getItem('mode') === '3d' && !location.hash.includes('video')) location.replace('3d.html'); } catch (e) { /* private mode */ }
+  </script>
 </head>
 <body>
   <!-- Elements required by the vendored DH_live mini runtime (js/MiniLive2.js) -->
@@ -37,6 +41,7 @@
       <option value="assets3">ตัวละคร 3</option>
       <option value="assets5">ตัวละคร 4</option>
     </select>
+    <a id="mode3dBtn" class="chip accent" href="3d.html">3D มือ</a>
     <button id="bgBtn" class="chip" type="button">พื้นหลัง: เปิด</button>
     <button id="installBtn" class="chip accent" type="button" hidden>ติดตั้ง</button>
     <button id="menuBtn" class="chip" type="button" aria-label="เมนู">⋯</button>
