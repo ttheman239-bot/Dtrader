@@ -17,8 +17,10 @@
 <body>
   <!-- Elements required by the vendored DH_live mini runtime (js/MiniLive2.js) -->
   <div id="stage">
-    <video id="background_video" autoplay loop muted playsinline></video>
-    <canvas id="canvas_video"></canvas>
+    <div class="scene">
+      <video id="background_video" autoplay loop muted playsinline></video>
+      <canvas id="canvas_video"></canvas>
+    </div>
     <div id="startMessage">กำลังโหลด…</div>
   </div>
   <canvas id="canvasEl"></canvas>

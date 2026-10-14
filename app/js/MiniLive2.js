@@ -202,13 +202,16 @@ function initChromaKeyGL() {
             
             float diff = distance(fg.rgb, keyColor);
             float mask = smoothstep(u_similarity, u_similarity + u_smoothness, diff);
-            
-            float spill = max(0.0, fg.g - max(fg.r, fg.b)) * u_spill;
-            vec3 color = fg.rgb - spill * keyColor;
-            
-            float edgeMask = smoothstep(u_similarity * 0.5, u_similarity, diff);
-            color = mix(color, fg.rgb, edgeMask * 0.5);
-            
+            // Choke the matte slightly so the green fringe is dropped, not blended.
+            mask = smoothstep(0.15, 1.0, mask);
+
+            // Spill suppression: pull green down toward max(r, b); fully on
+            // semi-transparent edge pixels, where the halo lives.
+            float gExcess = max(0.0, fg.g - max(fg.r, fg.b));
+            float edge = 1.0 - smoothstep(0.7, 1.0, mask);
+            vec3 color = fg.rgb;
+            color.g -= gExcess * mix(u_spill, 1.0, edge);
+
             outColor = vec4(color, mask);
         }
     `;

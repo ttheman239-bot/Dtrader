@@ -5,8 +5,11 @@
 [kleinlee/DH_live](https://github.com/kleinlee/DH_live) (`web_demo/static`, commit
 `4467e97`), released under the MIT License.
 
-The only change to those files: the auto-start `DOMContentLoaded` listener was
-removed from `js/MiniMateLoader.js` so that `app.js` controls startup.
+Changes to those files:
+- `js/MiniMateLoader.js`: the auto-start `DOMContentLoaded` listener was removed so
+  that `app.js` controls startup.
+- `js/MiniLive2.js`: the green-screen shader chokes the matte and fully removes green
+  spill on edge pixels, to get rid of the green halo around the person.
 
 The sample avatars carry a "MatesX" mark. Per the DH_live README, commercial use of
 the web avatars without the mark requires authorization from matesx.com.

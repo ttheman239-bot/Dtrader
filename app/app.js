@@ -288,6 +288,11 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:' && !inApk) {
 
 // ---------- boot ----------
 
+// Tighter key + stronger spill removal than the DH_live defaults (less green halo).
+CONFIG.chromaKey.similarity = 0.42;
+CONFIG.chromaKey.smoothness = 0.12;
+CONFIG.chromaKey.spill = 0.85;
+
 async function boot() {
   setReady(false);
   let dir = 'assets';
