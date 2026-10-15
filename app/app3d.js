@@ -4,7 +4,8 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/three/addons/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMUtils } from './vendor/three-vrm.module.min.js';
+import { RoomEnvironment } from './vendor/three/addons/environments/RoomEnvironment.js';
+import { VRMLoaderPlugin, VRMUtils, VRMHumanoid } from './vendor/three-vrm.module.min.js';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
@@ -27,10 +28,15 @@ const canvas = $('canvas3d');
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
-scene.add(new THREE.HemisphereLight(0xfff4e6, 0x334155, 1.6));
+// Soft indoor reflections for the realistic (PBR) skin and clothes.
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+scene.add(new THREE.HemisphereLight(0xfff4e6, 0x334155, 1.2));
 const key = new THREE.DirectionalLight(0xffffff, 1.8);
 key.position.set(0.8, 1.6, 2.0);
 scene.add(key);
@@ -97,6 +103,7 @@ function collectBones() {
 // Each arm is described by a few angles (radians) plus a curl per finger.
 // `target` is where the arm is heading, `cur` follows it with smoothing.
 
+// `down` is overridden per model at boot.
 const REST = {
   down: 1.3, fwd: 0.12, twist: 0.0, elbow: 0.28, fore: -0.2, wrist: 0.05, wristSide: 0.0,
   curl: [0.25, 0.3, 0.35, 0.4, 0.45], spread: 0.1,
@@ -693,6 +700,98 @@ $('bgBtn').addEventListener('click', () => {
 });
 applyBackground();
 
+// ---------- realistic human (Microsoft Rocketbox) ----------
+// A plain glTF with a 3ds Max biped skeleton and ARKit-style blendshapes.
+// It is wrapped so it looks like a VRM to the rest of this file: a normalized
+// humanoid rig (three-vrm's VRMHumanoid) plus an expression manager that maps
+// VRM expression names onto the model's blendshapes.
+
+const BIPED = {
+  hips: 'Pelvis', spine: 'Spine', chest: 'Spine1', upperChest: 'Spine2', neck: 'Neck', head: 'Head',
+  leftEye: 'LEye', rightEye: 'REye',
+};
+for (const [side, S] of [['left', 'L'], ['right', 'R']]) {
+  Object.assign(BIPED, {
+    [side + 'Shoulder']: S + '_Clavicle', [side + 'UpperArm']: S + '_UpperArm',
+    [side + 'LowerArm']: S + '_Forearm', [side + 'Hand']: S + '_Hand',
+    [side + 'UpperLeg']: S + '_Thigh', [side + 'LowerLeg']: S + '_Calf',
+    [side + 'Foot']: S + '_Foot', [side + 'Toes']: S + '_Toe0',
+    [side + 'ThumbMetacarpal']: S + '_Finger0', [side + 'ThumbProximal']: S + '_Finger01', [side + 'ThumbDistal']: S + '_Finger02',
+  });
+  ['Index', 'Middle', 'Ring', 'Little'].forEach((f, i) => {
+    BIPED[side + f + 'Proximal'] = S + '_Finger' + (i + 1);
+    BIPED[side + f + 'Intermediate'] = S + '_Finger' + (i + 1) + '1';
+    BIPED[side + f + 'Distal'] = S + '_Finger' + (i + 1) + '2';
+  });
+}
+
+const FACE = {
+  aa: { AA_VI_10_aa: 1, AK_25_JawOpen: 0.3 },
+  ee: { AA_VI_11_E: 1 },
+  ih: { AA_VI_12_I: 1 },
+  oh: { AA_VI_13_O: 1, AK_25_JawOpen: 0.15 },
+  ou: { AA_VI_14_U: 1 },
+  blink: { AK_09_EyeBlinkLeft: 1, AK_10_EyeBlinkRight: 1 },
+  happy: { AK_44_MouthSmileLeft: 0.75, AK_45_MouthSmileRight: 0.75, AK_07_CheekSquintLeft: 0.5, AK_08_CheekSquintRight: 0.5 },
+  relaxed: { AK_44_MouthSmileLeft: 0.2, AK_45_MouthSmileRight: 0.2 },
+  surprised: { AK_21_EyeWideLeft: 1, AK_22_EyeWideRight: 1, AK_03_BrowInnerUp: 0.9, AK_25_JawOpen: 0.25 },
+  sad: { AK_30_MouthFrownLeft: 0.7, AK_31_MouthFrownRight: 0.7, AK_03_BrowInnerUp: 0.7 },
+  angry: { AK_30_MouthFrownLeft: 0.3, AK_31_MouthFrownRight: 0.3 },
+};
+
+function wrapHuman(gltf) {
+  const model = gltf.scene;
+  const humanBones = {};
+  for (const [name, b] of Object.entries(BIPED)) {
+    const node = model.getObjectByName('Bip01_' + b);
+    if (node) humanBones[name] = { node };
+  }
+  model.updateMatrixWorld(true);
+  const humanoid = new VRMHumanoid(humanBones);
+  const meshes = [];
+  model.traverse((o) => { if (o.isMesh && o.morphTargetDictionary) meshes.push(o); });
+  const values = {};
+  return {
+    scene: model,
+    humanoid,
+    lookAt: null,
+    meta: null,
+    expressionManager: {
+      setValue(n, v) { values[n] = v; },
+      getValue(n) { return values[n] || 0; },
+    },
+    update() {
+      humanoid.update();
+      for (const m of meshes) {
+        const inf = m.morphTargetInfluences;
+        inf.fill(0);
+        for (const [expr, v] of Object.entries(values)) {
+          const shapes = FACE[expr];
+          if (!shapes || !v) continue;
+          for (const [shape, w] of Object.entries(shapes)) {
+            const i = m.morphTargetDictionary[shape];
+            if (i != null) inf[i] = Math.min(1, inf[i] + v * w);
+          }
+        }
+      }
+    },
+  };
+}
+
+const MODELS = {
+  // restDown: how far the arms hang from the T-pose; halfW: framing width.
+  human: { file: 'models/human.glb', label: 'คนจริง', restDown: 1.42, halfW: 0.45 },
+  anime: { file: 'models/avatar.vrm', label: 'การ์ตูน', restDown: 1.3, halfW: 0.34 },
+};
+let modelKey = 'human';
+try { if (MODELS[localStorage.getItem('model3d')]) modelKey = localStorage.getItem('model3d'); } catch (e) { /* private mode */ }
+$('modelBtn').textContent = 'ตัวละคร: ' + MODELS[modelKey].label;
+$('modelBtn').addEventListener('click', () => {
+  const next = modelKey === 'human' ? 'anime' : 'human';
+  try { localStorage.setItem('model3d', next); } catch (e) { /* private mode */ }
+  location.reload();
+});
+
 // ---------- boot ----------
 
 async function boot() {
@@ -701,15 +800,21 @@ async function boot() {
   try {
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
-    const gltf = await loader.loadAsync('models/avatar.vrm', (e) => {
+    const gltf = await loader.loadAsync(MODELS[modelKey].file, (e) => {
       if (e.total) $('startMessage').textContent = 'กำลังโหลดโมเดล 3D… ' + Math.round((e.loaded / e.total) * 100) + '%';
     });
-    vrm = gltf.userData.vrm;
-    VRMUtils.removeUnnecessaryVertices(gltf.scene);
-    VRMUtils.combineSkeletons(gltf.scene);
-    if (vrm.meta && vrm.meta.metaVersion === '0') VRMUtils.rotateVRM0(vrm);
+    if (gltf.userData.vrm) {
+      vrm = gltf.userData.vrm;
+      VRMUtils.removeUnnecessaryVertices(gltf.scene);
+      VRMUtils.combineSkeletons(gltf.scene);
+      if (vrm.meta && vrm.meta.metaVersion === '0') VRMUtils.rotateVRM0(vrm);
+      root.add(vrm.scene);
+    } else {
+      root.add(gltf.scene);
+      vrm = wrapHuman(gltf);
+      root.add(vrm.humanoid.normalizedHumanBonesRoot);
+    }
     vrm.scene.traverse((o) => { o.frustumCulled = false; });
-    root.add(vrm.scene);
     collectBones();
     const lookTarget = new THREE.Object3D();
     camera.add(lookTarget);
@@ -727,7 +832,10 @@ async function boot() {
     body.hipsY = hips.y;
     body.thigh = hips.y - knee.y;
     body.seatHipsY = knee.y + 0.06;
-    frameUpper = { centerY: (head.y + 0.16 + hips.y - 0.05) / 2, height: head.y + 0.16 - (hips.y - 0.05), halfW: 0.34 };
+    frameUpper = { centerY: (head.y + 0.16 + hips.y - 0.08) / 2, height: head.y + 0.16 - (hips.y - 0.08), halfW: MODELS[modelKey].halfW };
+    REST.down = MODELS[modelKey].restDown;
+    setRest('left'); setRest('right');
+    for (const a of Object.values(arms)) Object.assign(a.cur, structuredClone(a.target));
     frameFull = { centerY: (head.y + 0.2) / 2 - 0.02, height: head.y + 0.26, halfW: WALK_RANGE + 0.32 };
     buildProps();
     resize();

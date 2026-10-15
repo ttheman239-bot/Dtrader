@@ -23,3 +23,8 @@ the web avatars without the mark requires authorization from matesx.com.
 - `models/avatar.vrm` — `VRM1_Constraint_Twist_Sample.vrm` from the three-vrm examples,
   © 2022 pixiv Inc., [VRM Public License 1.0](https://vrm.dev/licenses/1.0/): redistribution
   and modification allowed, commercial use allowed, credit not required.
+- `models/human.glb` — `Business_Female_01` from
+  [Microsoft Rocketbox](https://github.com/microsoft/Microsoft-Rocketbox) (MIT License,
+  © 2020 Microsoft), converted with `tools/rocketbox-convert.html`: re-posed and re-bound to a
+  T-pose, textures downscaled to 1024 px, only the 18 facial blendshapes the app uses kept.
+- `vendor/three/addons/environments/RoomEnvironment.js` — three.js, MIT License.
