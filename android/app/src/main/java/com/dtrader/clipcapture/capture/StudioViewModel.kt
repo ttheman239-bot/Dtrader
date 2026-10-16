@@ -186,7 +186,11 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             else -> null
         }
         if (problem != null) { _ui.update { it.copy(message = "บันทึกท่ากลางไม่ได้: $problem") }; return }
-        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        val copy = try {
+            if (bitmap.isRecycled) null else bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } catch (e: Throwable) {
+            null
+        } ?: run { _ui.update { it.copy(message = "ภาพจากกล้องยังไม่พร้อม ลองกดอีกครั้ง") }; return }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { f.saveReference(copy, features) }
@@ -205,7 +209,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
     fun setWide(on: Boolean) {
-        val zoom = rig.setWide(on)
+        val zoom = runCatching { rig.setWide(on) }.getOrNull()
         _ui.update {
             it.copy(
                 wide = on, zoom = zoom,

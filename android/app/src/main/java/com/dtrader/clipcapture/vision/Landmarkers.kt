@@ -29,8 +29,10 @@ class Landmarkers private constructor(
     fun detect(bitmap: Bitmap, timestampMs: Long): FrameFeatures {
         val ts = if (timestampMs <= lastTs) lastTs + 1 else timestampMs
         lastTs = ts
+        // Not closed on purpose: MPImage.close() recycles the bitmap, and the caller
+        // still needs it (e.g. to save the neutral-pose reference). GC frees it.
         val image = BitmapImageBuilder(bitmap).build()
-        try {
+        return run {
             val f = face.detectForVideo(image, ts)
             val p = pose.detectForVideo(image, ts)
             val h = hands.detectForVideo(image, ts)
@@ -53,14 +55,12 @@ class Landmarkers private constructor(
             val handArr = h.landmarks().map { lm ->
                 FloatArray(lm.size * 2).also { a -> lm.forEachIndexed { i, l -> a[i * 2] = l.x(); a[i * 2 + 1] = l.y() } }
             }
-            return FrameFeatures(
+            FrameFeatures(
                 timestampMs = ts, width = bitmap.width, height = bitmap.height,
                 face = faceXy, jawOpen = jaw,
                 yaw = angles.first, pitch = angles.second, roll = angles.third,
                 pose = poseArr, hands = handArr,
             )
-        } finally {
-            image.close()
         }
     }
 
