@@ -1,0 +1,67 @@
+name: Clip Capture APK
+
+on:
+  push:
+    paths: ['android/**', '.github/workflows/android-clip-capture.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clip-capture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Unit tests
+        run: gradle -p android --no-daemon testDebugUnitTest
+
+      - name: Build APK
+        run: gradle -p android --no-daemon assembleDebug
+
+      - name: Rename APK
+        id: apk
+        run: |
+          OUT="ClipCapture-${GITHUB_SHA::7}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "tag=clip-capture-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip-capture-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: "Clip Capture ${{ steps.apk.outputs.tag }}"
+          prerelease: true
+          body: |
+            ## Clip Capture (M1–M2)
+
+            Download `${{ steps.apk.outputs.path }}` on the phone, open it and allow installs from unknown sources.
+
+            Built from `${{ github.sha }}` (${{ github.ref_name }}). Signed with the Android debug key.
+          files: ${{ steps.apk.outputs.path }}
+          fail_on_unmatched_files: true

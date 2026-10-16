@@ -1,3 +1,5 @@
 build/
 .gradle/
 local.properties
+# MediaPipe models are downloaded at build time (see app/build.gradle.kts).
+app/src/main/assets/models/
