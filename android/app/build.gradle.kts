@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -45,7 +47,7 @@ val downloadModels by tasks.registering {
             if (!f.exists() || f.length() == 0L) {
                 f.parentFile.mkdirs()
                 logger.lifecycle("Downloading $name")
-                java.net.URI(url).toURL().openStream().use { input -> f.outputStream().use { input.copyTo(it) } }
+                URI(url).toURL().openStream().use { input -> f.outputStream().use { output -> input.copyTo(output) } }
             }
         }
     }
