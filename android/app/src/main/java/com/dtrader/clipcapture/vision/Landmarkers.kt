@@ -71,9 +71,9 @@ class Landmarkers private constructor(
     companion object {
         private const val TAG = "Landmarkers"
 
-        fun create(context: Context): Landmarkers {
+        fun create(context: Context, useGpu: Boolean): Landmarkers {
             val used = mutableListOf<String>()
-            val face = withFallback("face", used) { d ->
+            val face = withFallback("face", used, useGpu) { d ->
                 FaceLandmarker.createFromOptions(
                     context,
                     FaceLandmarker.FaceLandmarkerOptions.builder()
@@ -85,7 +85,7 @@ class Landmarkers private constructor(
                         .build(),
                 )
             }
-            val pose = withFallback("pose", used) { d ->
+            val pose = withFallback("pose", used, useGpu) { d ->
                 PoseLandmarker.createFromOptions(
                     context,
                     PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -95,7 +95,7 @@ class Landmarkers private constructor(
                         .build(),
                 )
             }
-            val hands = withFallback("hand", used) { d ->
+            val hands = withFallback("hand", used, useGpu) { d ->
                 HandLandmarker.createFromOptions(
                     context,
                     HandLandmarker.HandLandmarkerOptions.builder()
@@ -111,8 +111,12 @@ class Landmarkers private constructor(
         private fun base(path: String, delegate: Delegate) =
             BaseOptions.builder().setModelAssetPath(path).setDelegate(delegate).build()
 
-        private fun <T> withFallback(name: String, used: MutableList<String>, make: (Delegate) -> T): T =
-            try {
+        /**
+         * CPU by default: a GPU delegate that fails on some drivers can take the
+         * whole process down with a native crash that no try/catch sees.
+         */
+        private fun <T> withFallback(name: String, used: MutableList<String>, useGpu: Boolean, make: (Delegate) -> T): T =
+            if (!useGpu) make(Delegate.CPU).also { used += "$name:CPU" } else try {
                 make(Delegate.GPU).also { used += "$name:GPU" }
             } catch (e: Throwable) {
                 Log.w(TAG, "$name GPU delegate failed, using CPU", e)

@@ -36,7 +36,13 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 
-enum class Phase { IDLE, WAIT_NEUTRAL, RECORD_MOVE, RECORD_RETURN, SAVING }
+enum class Phase { IDLE, STARTING, RECORDING, SAVING, CUTTING }
+
+/** A clip found during the current recording. */
+data class FoundSegment(val startMs: Long, val endMs: Long, val qc: QcSummary, val stats: LiveStats)
+
+/** Short message shown as a banner; [id] changes on every new banner. */
+data class Banner(val id: Long, val text: String, val good: Boolean)
 
 data class StudioUi(
     val session: SessionEntity? = null,
@@ -48,46 +54,54 @@ data class StudioUi(
     val locked: Boolean = false,
     val lockNotes: List<String> = emptyList(),
     val delegates: String = "",
+    val modelsReady: Boolean = false,
     val analysisFps: Float = 0f,
     val inferenceMs: Long = 0,
     val hasFace: Boolean = false,
     val match: MatchResult? = null,
     val reference: Bitmap? = null,
     val ghost: Boolean = true,
+    val wide: Boolean = true,
+    val zoom: Float? = null,
     val phase: Phase = Phase.IDLE,
     val elapsedMs: Long = 0,
-    val instruction: String? = null,
+    val cue: String? = null,
     val tag: String = "calm",
-    val continuous: Boolean = true,
-    val lastClip: Pair<Int, QcSummary>? = null,
+    /** True while the user is back in neutral and a clip is being collected. */
+    val collecting: Boolean = false,
+    val found: List<FoundSegment> = emptyList(),
+    val banner: Banner? = null,
+    val cutProgress: Pair<Int, Int>? = null,
     val clipCount: Int = 0,
 )
 
-/** Setup/Calibrate and Capture for one session (§4.1–4.3). */
+/**
+ * Setup (calibrate, neutral pose) and continuous capture with automatic cutting
+ * (§4.1, §4.2, §4.4). Every camera/analysis callback is guarded: a failure is
+ * shown on screen instead of crashing the app.
+ */
 class StudioViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
-    private val configStore = ConfigStore(app)
     private val rig = CameraRig(app)
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private var landmarkers: Landmarkers? = null
     private var analyzer: FrameAnalyzer? = null
 
-    private val _ui = MutableStateFlow(StudioUi(config = configStore.load()))
+    private val _ui = MutableStateFlow(StudioUi(config = ConfigStore(app).load()))
     val ui: StateFlow<StudioUi> = _ui
 
     private var files: SessionFiles? = null
     private var matcher: PoseMatcher? = null
     @Volatile private var latest: Pair<FrameFeatures, Bitmap>? = null
 
-    // State machine bookkeeping (touched only on the analysis thread).
-    private var neutralSince = -1L
-    private var recording: Recording? = null
-    private var recordStart = 0L
-    private var recordFile: File? = null
-    private var recordNumber = 0
-    private var stats = LiveStats()
-    private var endFlags = mutableListOf<String>()
-    private var lastInstruction: String? = null
+    // Recording state (analysis thread + main thread; guarded by @Volatile where shared).
+    @Volatile private var recording: Recording? = null
+    @Volatile private var recordStartElapsed = 0L
+    private var takeFile: File? = null
+    private var segmenter: Segmenter? = null
+    private var nextCueAt = 0L
+    private var lastCue: String? = null
+    private var bannerSeq = 0L
     private var fpsWindowStart = 0L
     private var fpsWindowFrames = 0
 
@@ -97,43 +111,49 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             val s = db.sessions().get(sessionId) ?: return@launch
             val f = SessionFiles(getApplication(), s.id)
             files = f
-            val ref = withContext(Dispatchers.IO) { f.loadReferenceFeatures() to f.loadReferenceBitmap() }
-            ref.first?.let { matcher = runCatching { PoseMatcher(it, _ui.value.config) }.getOrNull() }
+            val (refFeatures, refBitmap) = withContext(Dispatchers.IO) { f.loadReferenceFeatures() to f.loadReferenceBitmap() }
+            refFeatures?.let { matcher = runCatching { PoseMatcher(it, _ui.value.config) }.getOrNull() }
             val count = db.clips().maxNumber(s.id)
-            _ui.update { it.copy(session = s, reference = ref.second, clipCount = count) }
+            _ui.update { it.copy(session = s, reference = refBitmap, clipCount = count, wide = it.config.wideAngle == 1) }
+            // Finish cutting clips left over from an interrupted session.
+            if (db.clips().pending(s.id).isNotEmpty()) cutPending()
         }
     }
 
-    /** Binds the camera to the screen. Called from the composable once the PreviewView exists. */
     fun bindCamera(owner: LifecycleOwner, previewView: PreviewView) {
         val s = _ui.value.session ?: return
         viewModelScope.launch {
             try {
-                val lm = landmarkers ?: withContext(Dispatchers.Default) { Landmarkers.create(getApplication()) }.also { landmarkers = it }
-                val a = analyzer ?: FrameAnalyzer(lm, _ui.value.config.analysisFps, ::onFrame).also { analyzer = it }
-                val caps = rig.bind(owner, previewView, s.lensFacing, _ui.value.config.fps, analysisExecutor, a)
-                _ui.update { it.copy(caps = caps, delegates = lm.delegates, error = null, locked = false, lockNotes = emptyList()) }
-                // Re-apply a previous calibration if the hardware allows manual values.
+                val cfg = _ui.value.config
+                val lm = landmarkers ?: withContext(Dispatchers.Default) { Landmarkers.create(getApplication(), cfg.useGpu == 1) }
+                    .also { landmarkers = it }
+                val a = analyzer ?: FrameAnalyzer(lm, cfg.analysisFps, ::onFrameSafe).also { analyzer = it }
+                val caps = rig.bind(owner, previewView, s.lensFacing, cfg.fps, analysisExecutor, a)
+                val zoom = rig.setWide(_ui.value.wide)
+                _ui.update { it.copy(caps = caps, delegates = lm.delegates, modelsReady = true, error = null, locked = false, lockNotes = emptyList(), zoom = zoom) }
                 s.cameraSettingsJson?.let { json ->
                     val v = CameraLockValues.fromJson(JSONObject(json))
                     try {
                         val notes = rig.applyLock(v, freshCalibration = false)
                         _ui.update {
-                            it.copy(locked = true, lockNotes = notes + "ใช้ค่าที่ Calibrate ไว้ (${java.text.DateFormat.getDateTimeInstance().format(v.calibratedAt)}) — แสงห้องอาจต่างจากตอนนั้น ถ้าภาพต่างไปให้ Calibrate ใหม่")
+                            it.copy(
+                                locked = true,
+                                lockNotes = notes + "ใช้ค่าที่ Calibrate ไว้ (${java.text.DateFormat.getDateTimeInstance().format(v.calibratedAt)}) — ถ้าแสงห้องต่างจากตอนนั้นให้ Calibrate ใหม่",
+                            )
                         }
                     } catch (e: Exception) {
-                        _ui.update { it.copy(lockNotes = listOf(e.message ?: "ใช้ค่าเดิมไม่ได้"), message = "กด Calibrate ก่อนถ่าย") }
+                        _ui.update { it.copy(lockNotes = listOf(e.message ?: "ใช้ค่าเดิมไม่ได้")) }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "bind failed", e)
-                _ui.update { it.copy(error = e.message ?: e.toString()) }
+                _ui.update { it.copy(error = (e.message ?: e.toString())) }
             }
         }
     }
 
     fun unbindCamera() {
-        if (recording != null) cancelRecording()
+        if (recording != null) stopRecording()
         rig.unbind()
     }
 
@@ -141,78 +161,181 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         val s = _ui.value.session ?: return
         if (_ui.value.phase != Phase.IDLE) return
         viewModelScope.launch {
-            _ui.update { it.copy(calibrating = true, locked = false, message = "กล้องกำลังปรับอัตโนมัติ ${_ui.value.config.calibrateAutoMs / 1000.0} วินาที… อยู่นิ่งๆ") }
+            _ui.update { it.copy(calibrating = true, locked = false) }
             try {
                 val (values, notes) = rig.calibrate(_ui.value.config.calibrateAutoMs)
                 val updated = s.copy(cameraSettingsJson = values.toJson().toString())
                 db.sessions().update(updated)
-                _ui.update { it.copy(session = updated, calibrating = false, locked = true, lockNotes = notes, message = "ล็อกค่ากล้องแล้ว") }
+                _ui.update { it.copy(session = updated, calibrating = false, locked = true, lockNotes = notes, banner = banner("ล็อกค่ากล้องแล้ว", true)) }
             } catch (e: Exception) {
                 _ui.update { it.copy(calibrating = false, message = "Calibrate ไม่สำเร็จ: ${e.message}") }
             }
         }
     }
 
-    /** §4.1 step 4: store the current frame + landmarks as the neutral pose. */
     fun saveReference() {
         val s = _ui.value.session ?: return
         val f = files ?: return
         val (features, bitmap) = latest ?: run { _ui.update { it.copy(message = "ยังไม่มีภาพจากกล้อง") }; return }
         val cfg = _ui.value.config
-        when {
-            !features.hasFace -> { _ui.update { it.copy(message = "บันทึกไม่ได้: ไม่พบหน้า") }; return }
-            features.shoulderWidth(cfg.minLandmarkVisibility) == null -> { _ui.update { it.copy(message = "บันทึกไม่ได้: มองไม่เห็นไหล่ทั้งสองข้าง") }; return }
-            features.jawOpen > cfg.jawOpenWarn -> { _ui.update { it.copy(message = "บันทึกไม่ได้: ปากเปิด — ปิดปากในท่ากลาง") }; return }
-            PoseMatcher.handOverMouth(features, cfg.mouthRegionGrow) -> { _ui.update { it.copy(message = "บันทึกไม่ได้: มือบังปาก") }; return }
+        val problem = when {
+            !features.hasFace -> "ไม่พบหน้า"
+            features.shoulderWidth(cfg.minLandmarkVisibility) == null -> "มองไม่เห็นไหล่ทั้งสองข้าง — ถอยห่างกล้องอีกนิด"
+            features.jawOpen > cfg.jawOpenWarn -> "ปากเปิด — ปิดปากในท่ากลาง"
+            PoseMatcher.handOverMouth(features, cfg.mouthRegionGrow) -> "มือบังปาก"
+            else -> null
         }
+        if (problem != null) { _ui.update { it.copy(message = "บันทึกท่ากลางไม่ได้: $problem") }; return }
         val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { f.saveReference(copy, features) }
-            matcher = PoseMatcher(features, cfg)
-            val updated = s.copy(referenceImagePath = f.referenceImage.path, referenceDataPath = f.referenceData.path)
-            db.sessions().update(updated)
-            _ui.update { it.copy(session = updated, reference = copy, message = "บันทึกท่ากลางแล้ว") }
+            try {
+                withContext(Dispatchers.IO) { f.saveReference(copy, features) }
+                matcher = PoseMatcher(features, cfg)
+                val updated = s.copy(referenceImagePath = f.referenceImage.path, referenceDataPath = f.referenceData.path)
+                db.sessions().update(updated)
+                _ui.update { it.copy(session = updated, reference = copy, banner = banner("บันทึกท่ากลางแล้ว", true)) }
+            } catch (e: Exception) {
+                _ui.update { it.copy(message = "บันทึกท่ากลางไม่ได้: ${e.message}") }
+            }
         }
     }
 
     fun setGhost(on: Boolean) = _ui.update { it.copy(ghost = on) }
     fun setTag(tag: String) = _ui.update { it.copy(tag = tag) }
-    fun setContinuous(on: Boolean) = _ui.update { it.copy(continuous = on) }
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
-    /** §4.3 step 1: arm auto-capture; recording starts once the neutral pose is held. */
-    fun start() {
-        val u = _ui.value
-        when {
-            !u.locked -> { _ui.update { it.copy(message = "กด Calibrate เพื่อล็อกค่ากล้องก่อน") }; return }
-            matcher == null -> { _ui.update { it.copy(message = "บันทึกท่ากลางก่อน") }; return }
-            u.phase != Phase.IDLE -> return
-        }
-        analysisExecutor.execute {
-            neutralSince = -1
-            _ui.update { it.copy(phase = Phase.WAIT_NEUTRAL, instruction = "อยู่ในท่ากลาง แล้วแอปจะเริ่มอัดเอง", lastClip = null) }
+    fun setWide(on: Boolean) {
+        val zoom = rig.setWide(on)
+        _ui.update {
+            it.copy(
+                wide = on, zoom = zoom,
+                message = if (it.reference != null) "เปลี่ยนมุมกล้องแล้ว — บันทึกท่ากลางใหม่เพื่อให้คะแนนตรง" else it.message,
+            )
         }
     }
 
-    /** Stop button: disarm, or abandon the clip being recorded (file is deleted). */
-    fun stop() {
-        analysisExecutor.execute {
-            when (_ui.value.phase) {
-                Phase.WAIT_NEUTRAL -> _ui.update { it.copy(phase = Phase.IDLE, instruction = null) }
-                Phase.RECORD_MOVE, Phase.RECORD_RETURN -> cancelRecording()
+    /** Starts one continuous recording; clips are found while it runs. */
+    fun startRecording() {
+        val u = _ui.value
+        val f = files ?: return
+        when {
+            u.phase != Phase.IDLE -> return
+            !u.locked -> { _ui.update { it.copy(message = "กด Calibrate ก่อน (ล็อกแสง/สี/โฟกัส)") }; return }
+            matcher == null -> { _ui.update { it.copy(message = "บันทึกท่ากลางก่อน") }; return }
+        }
+        val file = f.take(System.currentTimeMillis())
+        takeFile = file
+        recordStartElapsed = 0
+        analysisExecutor.execute { segmenter = Segmenter(_ui.value.config) }
+        _ui.update { it.copy(phase = Phase.STARTING, found = emptyList(), elapsedMs = 0, collecting = false, cue = null) }
+        try {
+            recording = rig.startRecording(file) { event -> onRecordEvent(event) }
+        } catch (e: Throwable) {
+            Log.e(TAG, "start failed", e)
+            recording = null
+            _ui.update { it.copy(phase = Phase.IDLE, message = "เริ่มอัดไม่ได้: ${e.message ?: e}") }
+        }
+    }
+
+    fun stopRecording() {
+        val r = recording ?: return
+        recording = null
+        _ui.update { it.copy(phase = Phase.SAVING, cue = null, collecting = false) }
+        try { r.stop() } catch (e: Throwable) { Log.e(TAG, "stop failed", e) }
+    }
+
+    private fun onRecordEvent(event: VideoRecordEvent) {
+        try {
+            when (event) {
+                is VideoRecordEvent.Start -> {
+                    recordStartElapsed = SystemClock.elapsedRealtime()
+                    nextCueAt = 0
+                    _ui.update { it.copy(phase = Phase.RECORDING, banner = banner("เริ่มอัดแล้ว — กลับท่ากลางค้าง 1 วินาทีระหว่างแต่ละท่า", true)) }
+                }
+                is VideoRecordEvent.Finalize -> onFinalized(event)
                 else -> Unit
             }
+        } catch (e: Throwable) {
+            Log.e(TAG, "record event", e)
+            _ui.update { it.copy(phase = Phase.IDLE, message = "ผิดพลาดระหว่างอัด: ${e.message ?: e}") }
         }
     }
 
-    private fun cancelRecording() {
-        endFlags = mutableListOf("cancelled")
-        _ui.update { it.copy(phase = Phase.SAVING, continuous = false) }
-        recording?.stop()
+    private fun onFinalized(event: VideoRecordEvent.Finalize) {
         recording = null
+        val file = takeFile
+        val found = _ui.value.found
+        val s = _ui.value.session
+        if (file == null || s == null) { _ui.update { it.copy(phase = Phase.IDLE) }; return }
+        if (event.hasError() && !file.exists()) {
+            _ui.update { it.copy(phase = Phase.IDLE, message = "บันทึกวิดีโอไม่สำเร็จ (error ${event.error}: ${event.cause?.message ?: ""})") }
+            return
+        }
+        viewModelScope.launch {
+            if (found.isEmpty()) {
+                withContext(Dispatchers.IO) { file.delete() }
+                _ui.update { it.copy(phase = Phase.IDLE, message = "เทคนี้ไม่พบท่าที่ใช้ได้ — ทำท่าแล้วกลับท่ากลางค้างไว้ 1 วินาที ให้แต่ละท่ายาว ${it.config.clipMinSec.toInt()}–${it.config.clipMaxSec.toInt()} วินาที") }
+                return@launch
+            }
+            var number = db.clips().maxNumber(s.id)
+            for (seg in found) {
+                number++
+                db.clips().insert(
+                    ClipEntity(
+                        sessionId = s.id, number = number, rawPath = file.path,
+                        startMs = seg.startMs, endMs = seg.endMs,
+                        createdAt = System.currentTimeMillis(), tag = _ui.value.tag,
+                        durationMs = seg.endMs - seg.startMs,
+                        flagsJson = "[]", qcStatus = seg.qc.status.name, qcReasonsJson = seg.qc.reasonsJson(),
+                        liveStatsJson = seg.stats.toJson().toString(),
+                    ),
+                )
+            }
+            _ui.update { it.copy(clipCount = number) }
+            cutPending()
+        }
+    }
+
+    /** Cuts every PENDING clip of this session out of its recording. */
+    private suspend fun cutPending() {
+        val s = _ui.value.session ?: return
+        val f = files ?: return
+        val pending = db.clips().pending(s.id)
+        if (pending.isEmpty()) { _ui.update { it.copy(phase = Phase.IDLE) }; return }
+        val exporter = ClipExporter(getApplication(), _ui.value.config.fps)
+        var ok = 0
+        val t0 = SystemClock.elapsedRealtime()
+        pending.forEachIndexed { i, clip ->
+            _ui.update { it.copy(phase = Phase.CUTTING, cutProgress = (i + 1) to pending.size) }
+            val out = f.clip(clip.number)
+            try {
+                val r = exporter.export(File(clip.rawPath), clip.startMs, clip.endMs, out)
+                db.clips().update(clip.copy(clipPath = out.path, exportStatus = "DONE", durationMs = r.durationMs, exportError = null))
+                ok++
+            } catch (e: Throwable) {
+                Log.e(TAG, "export failed", e)
+                db.clips().update(clip.copy(exportStatus = "FAILED", exportError = e.message ?: e.toString()))
+            }
+        }
+        val secs = (SystemClock.elapsedRealtime() - t0) / 1000f
+        _ui.update {
+            it.copy(
+                phase = Phase.IDLE, cutProgress = null,
+                banner = banner("ตัดคลิปเสร็จ $ok/${pending.size} คลิป (%.1f วินาที)".format(secs), ok == pending.size),
+            )
+        }
     }
 
     // ---- analysis thread ----
+
+    private fun onFrameSafe(features: FrameFeatures, bitmap: Bitmap, inferenceMs: Long) {
+        try {
+            onFrame(features, bitmap, inferenceMs)
+        } catch (e: Throwable) {
+            Log.e(TAG, "frame", e)
+            _ui.update { it.copy(message = "การวิเคราะห์ผิดพลาด: ${e.message ?: e}") }
+        }
+    }
 
     private fun onFrame(features: FrameFeatures, bitmap: Bitmap, inferenceMs: Long) {
         latest = features to bitmap
@@ -225,32 +348,41 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
 
         val cfg = _ui.value.config
         val m = matcher?.match(features)
-        val score = m?.score
-        val phase = _ui.value.phase
 
-        val threshold = if (phase == Phase.RECORD_RETURN) cfg.poseMatchEnd else cfg.poseMatchStart
-        if (score != null && score >= threshold) {
-            if (neutralSince < 0) neutralSince = now
-        } else {
-            neutralSince = -1
-        }
-        val heldMs = if (neutralSince >= 0) now - neutralSince else 0
-
-        when (phase) {
-            Phase.WAIT_NEUTRAL -> if (heldMs >= cfg.neutralHoldStartMs) beginRecording(now)
-            Phase.RECORD_MOVE, Phase.RECORD_RETURN -> {
-                collectStats(features, m, now)
-                val elapsed = now - recordStart
-                if (phase == Phase.RECORD_MOVE && elapsed >= cfg.clipMinSec * 1000) {
-                    neutralSince = -1
-                    _ui.update { it.copy(phase = Phase.RECORD_RETURN, instruction = "กลับท่ากลาง") }
-                } else if (phase == Phase.RECORD_RETURN) {
-                    if (heldMs >= cfg.neutralHoldEndMs) finishRecording(emptyList())
-                    else if (elapsed >= cfg.clipMaxSec * 1000) finishRecording(listOf("end_not_neutral"))
+        var newFound: FoundSegment? = null
+        var newBanner: Banner? = null
+        var cue: String? = _ui.value.cue
+        var elapsed = _ui.value.elapsedMs
+        val start = recordStartElapsed
+        val seg = segmenter
+        if (_ui.value.phase == Phase.RECORDING && start > 0 && seg != null) {
+            // Frame capture time ≈ now − model time; good to ~0.1 s.
+            val t = now - inferenceMs - start
+            elapsed = now - start
+            val w = m?.warnings.orEmpty()
+            when (val ev = seg.feed(
+                Segmenter.Frame(
+                    tMs = t, score = m?.score, jawOpen = features.jawOpen,
+                    handOverMouth = LiveWarning.HAND_OVER_MOUTH in w, hasFace = features.hasFace,
+                    faceSizeOut = LiveWarning.FACE_TOO_SMALL in w || LiveWarning.FACE_TOO_LARGE in w,
+                    faceOutOfFrame = LiveWarning.FACE_OUT_OF_FRAME in w,
+                ),
+            )) {
+                is Segmenter.Event.Found -> {
+                    newFound = FoundSegment(ev.startMs.coerceAtLeast(0), ev.endMs, ev.qc, ev.stats)
+                    newBanner = banner(
+                        "✓ พบท่าที่ ${_ui.value.found.size + 1} (%.1f วิ)".format((ev.endMs - ev.startMs) / 1000f) +
+                            if (ev.qc.status == QcStatus.WARN) " · ${ev.qc.reasons.first()}" else "",
+                        true,
+                    )
                 }
-                _ui.update { it.copy(elapsedMs = elapsed) }
+                is Segmenter.Event.Rejected -> newBanner = banner("ไม่ใช้ท่านี้: ${ev.reasons.first()}", false)
+                null -> Unit
             }
-            else -> Unit
+            if (now >= nextCueAt) {
+                cue = Instructions.next(_ui.value.tag, lastCue).also { lastCue = it }
+                nextCueAt = now + (cfg.cueIntervalSec * 1000).toLong()
+            }
         }
 
         _ui.update {
@@ -259,93 +391,20 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 hasFace = features.hasFace,
                 inferenceMs = inferenceMs,
                 analysisFps = measuredFps ?: it.analysisFps,
+                elapsedMs = elapsed,
+                cue = cue,
+                collecting = seg?.anchorMs != null && it.phase == Phase.RECORDING,
+                found = newFound?.let { f -> it.found + f } ?: it.found,
+                banner = newBanner ?: it.banner,
             )
         }
     }
 
-    private fun beginRecording(now: Long) {
-        val s = _ui.value.session ?: return
-        val f = files ?: return
-        recordNumber = _ui.value.clipCount + 1
-        val file = f.rawClip(recordNumber)
-        recordFile = file
-        stats = LiveStats()
-        endFlags = mutableListOf()
-        recordStart = now
-        val instruction = Instructions.next(_ui.value.tag, lastInstruction).also { lastInstruction = it }
-        _ui.update { it.copy(phase = Phase.RECORD_MOVE, elapsedMs = 0, instruction = instruction) }
-        try {
-            recording = rig.startRecording(file) { event -> onRecordEvent(event, s.id) }
-        } catch (e: Exception) {
-            _ui.update { it.copy(phase = Phase.IDLE, message = "เริ่มอัดไม่ได้: ${e.message}") }
-        }
-    }
-
-    private fun finishRecording(flags: List<String>) {
-        endFlags = flags.toMutableList()
-        _ui.update { it.copy(phase = Phase.SAVING, instruction = "กำลังบันทึก…") }
-        recording?.stop()
-        recording = null
-    }
-
-    private fun collectStats(f: FrameFeatures, m: MatchResult?, now: Long) {
-        val s = stats
-        s.frames++
-        if (!f.hasFace) { s.noFaceFrames++; return }
-        s.jawMax = maxOf(s.jawMax, f.jawOpen)
-        s.jawSum += f.jawOpen
-        val w = m?.warnings ?: emptySet()
-        if (LiveWarning.HAND_OVER_MOUTH in w) {
-            val sec = (now - recordStart) / 1000f
-            if (s.handOverMouthFrames == 0) s.handOverMouthFirstSec = sec
-            s.handOverMouthLastSec = sec
-            s.handOverMouthFrames++
-        }
-        if (LiveWarning.FACE_TOO_SMALL in w || LiveWarning.FACE_TOO_LARGE in w) s.faceSizeOutFrames++
-        if (LiveWarning.FACE_OUT_OF_FRAME in w) s.faceOutOfFrameFrames++
-        m?.score?.let { s.scoreMin = minOf(s.scoreMin, it); s.scoreSum += it; s.scoredFrames++ }
-    }
-
-    private fun onRecordEvent(event: VideoRecordEvent, sessionId: Long) {
-        if (event !is VideoRecordEvent.Finalize) return
-        val file = recordFile ?: return
-        val flags = endFlags.toList()
-        val statsCopy = stats
-        val cfg = _ui.value.config
-        viewModelScope.launch {
-            if (event.hasError() && event.error != VideoRecordEvent.Finalize.ERROR_NONE && !file.exists()) {
-                _ui.update { it.copy(phase = Phase.IDLE, message = "บันทึกคลิปไม่สำเร็จ (error ${event.error})") }
-                return@launch
-            }
-            if ("cancelled" in flags) {
-                withContext(Dispatchers.IO) { file.delete() }
-                _ui.update { it.copy(phase = Phase.IDLE, instruction = null, message = "ยกเลิกคลิปแล้ว") }
-                return@launch
-            }
-            val durationMs = event.recordingStats.recordedDurationNanos / 1_000_000
-            val qc = LiveQc.evaluate(statsCopy, durationMs / 1000f, flags, cfg)
-            db.clips().insert(
-                ClipEntity(
-                    sessionId = sessionId,
-                    number = recordNumber,
-                    rawPath = file.path,
-                    createdAt = System.currentTimeMillis(),
-                    tag = _ui.value.tag,
-                    durationMs = durationMs,
-                    flagsJson = JSONArray(flags).toString(),
-                    qcStatus = qc.status.name,
-                    qcReasonsJson = qc.reasonsJson(),
-                    liveStatsJson = statsCopy.toJson().toString(),
-                ),
-            )
-            _ui.update { it.copy(phase = Phase.IDLE, instruction = null, lastClip = recordNumber to qc, clipCount = recordNumber) }
-            if (_ui.value.continuous) start()
-        }
-    }
+    private fun banner(text: String, good: Boolean) = Banner(++bannerSeq, text, good)
 
     override fun onCleared() {
         rig.unbind()
-        analysisExecutor.execute { landmarkers?.close() }
+        analysisExecutor.execute { runCatching { landmarkers?.close() } }
         analysisExecutor.shutdown()
     }
 

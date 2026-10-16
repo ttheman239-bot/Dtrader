@@ -187,6 +187,15 @@ class CameraRig(private val context: Context) {
         return caps!!
     }
 
+    /** Widest zoom the camera offers (ultra-wide on many phones) or 1×. Returns the ratio set. */
+    fun setWide(on: Boolean): Float? {
+        val cam = camera ?: return null
+        val zs = cam.cameraInfo.zoomState.value ?: return null
+        val ratio = if (on) zs.minZoomRatio else 1f.coerceIn(zs.minZoomRatio, zs.maxZoomRatio)
+        cam.cameraControl.setZoomRatio(ratio)
+        return ratio
+    }
+
     fun unbind() {
         provider?.unbindAll()
         camera = null

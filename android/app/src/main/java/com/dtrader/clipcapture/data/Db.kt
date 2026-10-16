@@ -37,9 +37,18 @@ data class SessionEntity(
 data class ClipEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sessionId: Long,
-    /** 1-based number within the session; also used in the file name. */
+    /** 1-based number within the session; also used in the file name (clip_###.mp4). */
     val number: Int,
+    /** The continuous recording this clip was cut from. */
     val rawPath: String,
+    /** Cut points inside [rawPath], in ms. */
+    val startMs: Long,
+    val endMs: Long,
+    /** The cut clip (clip_###.mp4), null until exported. */
+    val clipPath: String? = null,
+    /** PENDING, DONE or FAILED. */
+    val exportStatus: String = "PENDING",
+    val exportError: String? = null,
     val createdAt: Long,
     /** "calm" or "active". */
     val tag: String,
@@ -86,14 +95,20 @@ interface ClipDao {
     @Query("SELECT * FROM clips WHERE sessionId = :sessionId")
     suspend fun listForSession(sessionId: Long): List<ClipEntity>
 
+    @Query("SELECT * FROM clips WHERE sessionId = :sessionId AND exportStatus = 'PENDING' ORDER BY number")
+    suspend fun pending(sessionId: Long): List<ClipEntity>
+
     @Insert
     suspend fun insert(clip: ClipEntity): Long
+
+    @Update
+    suspend fun update(clip: ClipEntity)
 
     @Delete
     suspend fun delete(clip: ClipEntity)
 }
 
-@Database(entities = [SessionEntity::class, ClipEntity::class], version = 1, exportSchema = false)
+@Database(entities = [SessionEntity::class, ClipEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun clips(): ClipDao
@@ -104,6 +119,8 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "clipcapture.db")
+                    // Pre-release schema: clips from 0.2 (single-shot mode) aren't migrated.
+                    .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }
     }

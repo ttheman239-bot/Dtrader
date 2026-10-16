@@ -48,6 +48,16 @@ data class CaptureConfig(
     val mouthRegionGrow: Float = 0.5f,
     /** Pose landmark visibility needed to treat a wrist as visible. */
     val minLandmarkVisibility: Float = 0.5f,
+
+    // Continuous recording with automatic cutting (§4.4)
+    /** A cut needs the pose score to dip at least this far below the neutral threshold in between. */
+    val segmentMinMotion: Float = 15f,
+    /** Seconds between new movement cues while recording. */
+    val cueIntervalSec: Float = 8f,
+    /** 1 = try MediaPipe GPU delegate (falls back to CPU), 0 = CPU only. */
+    val useGpu: Int = 0,
+    /** 1 = start the camera at its widest zoom (ultra-wide where available). */
+    val wideAngle: Int = 1,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         FIELDS.forEach { f -> put(f.key, f.get(this@CaptureConfig)) }
@@ -101,6 +111,10 @@ data class CaptureConfig(
             f("face_edge_margin", "face_edge_margin (สัดส่วนเฟรม)", { it.faceEdgeMargin }, { c, v -> c.copy(faceEdgeMargin = v) }),
             f("mouth_region_grow", "mouth_region_grow", { it.mouthRegionGrow }, { c, v -> c.copy(mouthRegionGrow = v) }),
             f("min_landmark_visibility", "min_landmark_visibility", { it.minLandmarkVisibility }, { c, v -> c.copy(minLandmarkVisibility = v) }),
+            f("segment_min_motion", "segment_min_motion (คะแนนที่ต้องลดลงระหว่างท่า)", { it.segmentMinMotion }, { c, v -> c.copy(segmentMinMotion = v) }),
+            f("cue_interval_sec", "cue_interval_sec (เปลี่ยนคำแนะนำท่าทุกกี่วินาที)", { it.cueIntervalSec }, { c, v -> c.copy(cueIntervalSec = v) }),
+            i("use_gpu", "use_gpu (0 = CPU, 1 = GPU)", { it.useGpu }, { c, v -> c.copy(useGpu = v) }),
+            i("wide_angle", "wide_angle (1 = มุมกว้างสุด)", { it.wideAngle }, { c, v -> c.copy(wideAngle = v) }),
         )
 
         fun fromJson(json: JSONObject): CaptureConfig =

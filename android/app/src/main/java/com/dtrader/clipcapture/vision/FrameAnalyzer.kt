@@ -3,6 +3,7 @@ package com.dtrader.clipcapture.vision
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.SystemClock
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 
@@ -24,14 +25,19 @@ class FrameAnalyzer(
             val now = SystemClock.elapsedRealtime()
             if (now - lastRun < 1000L / analysisFps.coerceAtLeast(1)) return
             lastRun = now
-            val raw = proxy.toBitmap()
-            val rot = proxy.imageInfo.rotationDegrees
-            val upright = if (rot == 0) raw else Bitmap.createBitmap(
-                raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rot.toFloat()) }, true,
-            )
-            val t0 = SystemClock.elapsedRealtime()
-            val features = landmarkers.detect(upright, proxy.imageInfo.timestamp / 1_000_000)
-            onFrame(features, upright, SystemClock.elapsedRealtime() - t0)
+            // An exception on this executor would kill the app; log it and drop the frame.
+            try {
+                val raw = proxy.toBitmap()
+                val rot = proxy.imageInfo.rotationDegrees
+                val upright = if (rot == 0) raw else Bitmap.createBitmap(
+                    raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rot.toFloat()) }, true,
+                )
+                val t0 = SystemClock.elapsedRealtime()
+                val features = landmarkers.detect(upright, proxy.imageInfo.timestamp / 1_000_000)
+                onFrame(features, upright, SystemClock.elapsedRealtime() - t0)
+            } catch (e: Throwable) {
+                Log.e("FrameAnalyzer", "frame dropped", e)
+            }
         }
     }
 }

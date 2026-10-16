@@ -15,8 +15,8 @@ android {
         applicationId = "com.dtrader.clipcapture"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.0-m2"
+        versionCode = 2
+        versionName = "0.3.0"
     }
 
     buildFeatures { compose = true }
@@ -74,6 +74,11 @@ dependencies {
     implementation("androidx.camera:camera-view:$camerax")
 
     implementation("com.google.mediapipe:tasks-vision:0.10.20")
+
+    val media3 = "1.4.1"
+    implementation("androidx.media3:media3-transformer:$media3")
+    implementation("androidx.media3:media3-effect:$media3")
+    implementation("androidx.media3:media3-common:$media3")
 
     val room = "2.6.1"
     implementation("androidx.room:room-runtime:$room")

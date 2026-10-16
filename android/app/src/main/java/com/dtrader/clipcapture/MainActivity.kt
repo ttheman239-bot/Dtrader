@@ -69,16 +69,16 @@ private fun App(activity: ComponentActivity) {
         "sessions" -> SessionsScreen(onOpen = { push("menu/$it") }, onSettings = { push("settings") })
         "settings" -> SettingsScreen(onBack = pop)
         "menu" -> SessionMenuScreen(sessionId, onNavigate = { push("$it/$sessionId") }, onBack = pop)
-        "studio" -> CameraGate(activity, onBack = pop) { StudioRoute(activity, sessionId, onLibrary = { push("library/$sessionId") }) }
+        "studio" -> CameraGate(activity, onBack = pop) { StudioRoute(activity, sessionId, onLibrary = { push("library/$sessionId") }, onBack = pop) }
         "library" -> LibraryScreen(sessionId, onBack = pop)
         "transitions" -> NotSupportedScreen("Transitions", "M5", "จะคำนวณ transition matrix จากจุดตัดของทุกคลิป (ต้องมี M3 ก่อน) แล้วแสดงเป็น heatmap", pop)
-        "preview" -> NotSupportedScreen("Sequence Preview", "M5", "จะเล่นสุ่มต่อเนื่องด้วย ExoPlayer สองตัว + crossfade ตาม transition matrix", pop)
+        "preview" -> NotSupportedScreen("Sequence Preview", "M5", "จะเล่นสุ่มต่อเนื่องด้วย ExoPlayer สองตัว + crossfade ตาม transition matrix (ตอนนี้เปิดดูทีละคลิปได้ในคลัง)", pop)
         "export" -> NotSupportedScreen("Export", "M6", "จะสร้าง Clip Package (.zip) พร้อม manifest.json และส่งผ่าน Share / LAN upload", pop)
     }
 }
 
 @Composable
-private fun StudioRoute(activity: ComponentActivity, sessionId: Long, onLibrary: () -> Unit) {
+private fun StudioRoute(activity: ComponentActivity, sessionId: Long, onLibrary: () -> Unit, onBack: () -> Unit) {
     val vm: StudioViewModel = viewModel(key = "studio-$sessionId")
     LaunchedEffect(sessionId) { vm.load(sessionId) }
     // Lock the screen to the session's orientation while filming.
@@ -94,7 +94,7 @@ private fun StudioRoute(activity: ComponentActivity, sessionId: Long, onLibrary:
     // use cases get the right target rotation.
     val orientation = LocalConfiguration.current.orientation
     val p = portrait
-    if (p != null && (orientation == Configuration.ORIENTATION_PORTRAIT) == p) StudioScreen(vm, onLibrary)
+    if (p != null && (orientation == Configuration.ORIENTATION_PORTRAIT) == p) StudioScreen(vm, onLibrary, onBack)
 }
 
 @Composable

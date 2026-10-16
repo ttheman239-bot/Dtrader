@@ -13,7 +13,12 @@ class SessionFiles(context: Context, sessionId: Long) {
     val referenceData = File(dir, "reference.json")
     val rawDir: File = File(dir, "raw").apply { mkdirs() }
 
-    fun rawClip(number: Int) = File(rawDir, "raw_%03d.mp4".format(number))
+    val clipDir: File = File(dir, "clips").apply { mkdirs() }
+
+    /** A continuous recording ("take"). */
+    fun take(timestamp: Long) = File(rawDir, "take_$timestamp.mp4")
+
+    fun clip(number: Int) = File(clipDir, "clip_%03d.mp4".format(number))
 
     fun saveReference(bitmap: Bitmap, features: FrameFeatures) {
         referenceImage.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
