@@ -42,7 +42,7 @@ class SegmenterTest {
     }
 
     @Test fun rejectsWithoutRealMovement() {
-        val ev = run(15_000, score = neutralMoveNeutral(1_500, 13_000, moveScore = 80f))
+        val ev = run(15_000, score = neutralMoveNeutral(1_500, 13_000, moveScore = cfg.poseMatchStart - 8f))
         assertTrue(ev.single() is Segmenter.Event.Rejected)
     }
 
