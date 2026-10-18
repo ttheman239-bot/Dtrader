@@ -189,6 +189,19 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
 
         if (showSetup && !recording) SetupPanel(ui, vm) { showSetup = false }
 
+        ui.countdown?.let { n ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$n", color = Color.White, fontSize = 120.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "จัดท่ากลาง: หน้าตรง ปากปิด เห็นไหล่ มือวางนิ่ง",
+                        color = Color.White, fontSize = 16.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Glass).padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+
         ui.cutProgress?.let { (i, n) ->
             Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -457,7 +470,7 @@ private fun SetupSteps(ui: StudioUi, vm: StudioViewModel) {
     ) {
         Text("ตั้งค่าก่อนถ่าย", color = Color.White, fontWeight = FontWeight.Bold)
         StepRow(1, "ล็อกแสง/สี/โฟกัส", done = ui.locked, busy = ui.calibrating, action = if (ui.calibrating) "กำลังปรับ…" else "Calibrate", enabled = ui.caps != null && !ui.calibrating, onClick = vm::calibrate)
-        StepRow(2, "นั่งท่ากลาง ปากปิด เห็นไหล่", done = ui.reference != null, busy = false, action = "บันทึกท่ากลาง", enabled = ui.hasFace, onClick = vm::saveReference)
+        StepRow(2, "นั่งท่ากลาง ปากปิด เห็นไหล่", done = ui.reference != null, busy = false, action = ui.countdown?.let { "ยกเลิก ($it)" } ?: "บันทึกท่ากลาง", enabled = ui.hasFace || ui.countdown != null, onClick = vm::startReferenceCountdown)
     }
 }
 
@@ -488,7 +501,7 @@ private fun SetupPanel(ui: StudioUi, vm: StudioViewModel, onClose: () -> Unit) {
         ) {
             Text("กล้องและท่ากลาง", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             StepRow(1, "ล็อกแสง/สี/โฟกัส", ui.locked, ui.calibrating, if (ui.calibrating) "กำลังปรับ…" else "Calibrate", ui.caps != null && !ui.calibrating, vm::calibrate)
-            StepRow(2, "บันทึกท่ากลาง", ui.reference != null, false, "บันทึกท่ากลาง", ui.hasFace, vm::saveReference)
+            StepRow(2, "บันทึกท่ากลาง", ui.reference != null, false, ui.countdown?.let { "ยกเลิก ($it)" } ?: "บันทึกท่ากลาง", ui.hasFace || ui.countdown != null, vm::startReferenceCountdown)
             Info("fps", ui.caps?.fpsNote ?: "—")
             Info("ซูม", ui.zoom?.let { "%.2f×".format(it) } ?: "—")
             Info("โมเดล", ui.delegates.ifEmpty { "—" })

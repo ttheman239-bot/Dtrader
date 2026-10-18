@@ -31,6 +31,8 @@ data class CaptureConfig(
     // Real-time analysis (§4.2)
     val analysisFps: Int = 12,
     val calibrateAutoMs: Int = 2000,
+    /** Seconds to get into position after pressing "save neutral pose". */
+    val referenceCountdownSec: Int = 3,
     /** Tolerances: an error equal to the tolerance scores 0 for that component. */
     val faceTolEyeDist: Float = 0.35f,
     val headAngleTolDeg: Float = 15f,
@@ -99,6 +101,7 @@ data class CaptureConfig(
             i("no_repeat_last_n", "no_repeat_last_n (M5)", { it.noRepeatLastN }, { c, v -> c.copy(noRepeatLastN = v) }),
             i("analysis_fps", "analysis_fps (real-time)", { it.analysisFps }, { c, v -> c.copy(analysisFps = v) }),
             i("calibrate_auto_ms", "calibrate_auto_ms", { it.calibrateAutoMs }, { c, v -> c.copy(calibrateAutoMs = v) }),
+            i("reference_countdown_sec", "reference_countdown_sec (นับถอยหลังก่อนบันทึกท่ากลาง)", { it.referenceCountdownSec }, { c, v -> c.copy(referenceCountdownSec = v) }),
             f("face_tol_eye_dist", "face_tol (× ระยะตา)", { it.faceTolEyeDist }, { c, v -> c.copy(faceTolEyeDist = v) }),
             f("head_angle_tol_deg", "head_angle_tol (องศา)", { it.headAngleTolDeg }, { c, v -> c.copy(headAngleTolDeg = v) }),
             f("shoulder_tol_width", "shoulder_tol (× ความกว้างไหล่)", { it.shoulderTolWidth }, { c, v -> c.copy(shoulderTolWidth = v) }),

@@ -81,6 +81,8 @@ data class StudioUi(
     val found: List<FoundSegment> = emptyList(),
     val banner: Banner? = null,
     val cutProgress: Pair<Int, Int>? = null,
+    /** Seconds left before the neutral pose is saved, or null when not counting down. */
+    val countdown: Int? = null,
     val clipCount: Int = 0,
 )
 
@@ -179,6 +181,29 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(session = updated, calibrating = false, locked = true, lockNotes = notes, banner = banner("ล็อกค่ากล้องแล้ว", true)) }
             } catch (e: Exception) {
                 _ui.update { it.copy(calibrating = false, message = "Calibrate ไม่สำเร็จ: ${e.message}") }
+            }
+        }
+    }
+
+    private var countdownJob: kotlinx.coroutines.Job? = null
+
+    /** Gives the user reference_countdown_sec to get into position, then saves the neutral pose. Pressing again cancels. */
+    fun startReferenceCountdown() {
+        countdownJob?.let { it.cancel(); countdownJob = null; _ui.update { u -> u.copy(countdown = null) }; return }
+        if (_ui.value.phase != Phase.IDLE) return
+        countdownJob = viewModelScope.launch {
+            try {
+                for (s in _ui.value.config.referenceCountdownSec downTo 1) {
+                    _ui.update { it.copy(countdown = s) }
+                    kotlinx.coroutines.delay(1000)
+                }
+                _ui.update { it.copy(countdown = null) }
+                saveReference()
+            } finally {
+                if (countdownJob === coroutineContext[kotlinx.coroutines.Job]) {
+                    countdownJob = null
+                    _ui.update { it.copy(countdown = null) }
+                }
             }
         }
     }
