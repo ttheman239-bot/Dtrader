@@ -60,6 +60,11 @@ data class StudioUi(
     val hasFace: Boolean = false,
     val match: MatchResult? = null,
     val reference: Bitmap? = null,
+    /** Landmarks of the neutral pose and of the latest frame, for the ghost outline. */
+    val refFeatures: FrameFeatures? = null,
+    val live: FrameFeatures? = null,
+    /** How long the neutral pose has been held right now, in ms (0 if not neutral). */
+    val heldMs: Long = 0,
     val ghost: Boolean = true,
     val wide: Boolean = true,
     val zoom: Float? = null,
@@ -102,6 +107,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     private var nextCueAt = 0L
     private var lastCue: String? = null
     private var bannerSeq = 0L
+    private var neutralSince = -1L
     private var fpsWindowStart = 0L
     private var fpsWindowFrames = 0
 
@@ -114,7 +120,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             val (refFeatures, refBitmap) = withContext(Dispatchers.IO) { f.loadReferenceFeatures() to f.loadReferenceBitmap() }
             refFeatures?.let { matcher = runCatching { PoseMatcher(it, _ui.value.config) }.getOrNull() }
             val count = db.clips().maxNumber(s.id)
-            _ui.update { it.copy(session = s, reference = refBitmap, clipCount = count, wide = it.config.wideAngle == 1) }
+            _ui.update { it.copy(session = s, reference = refBitmap, refFeatures = refFeatures, clipCount = count, wide = it.config.wideAngle == 1) }
             // Finish cutting clips left over from an interrupted session.
             if (db.clips().pending(s.id).isNotEmpty()) cutPending()
         }
@@ -197,7 +203,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 matcher = PoseMatcher(features, cfg)
                 val updated = s.copy(referenceImagePath = f.referenceImage.path, referenceDataPath = f.referenceData.path)
                 db.sessions().update(updated)
-                _ui.update { it.copy(session = updated, reference = copy, banner = banner("บันทึกท่ากลางแล้ว", true)) }
+                _ui.update { it.copy(session = updated, reference = copy, refFeatures = features, banner = banner("บันทึกท่ากลางแล้ว", true)) }
             } catch (e: Exception) {
                 _ui.update { it.copy(message = "บันทึกท่ากลางไม่ได้: ${e.message}") }
             }
@@ -254,7 +260,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 is VideoRecordEvent.Start -> {
                     recordStartElapsed = SystemClock.elapsedRealtime()
                     nextCueAt = 0
-                    _ui.update { it.copy(phase = Phase.RECORDING, banner = banner("เริ่มอัดแล้ว — กลับท่ากลางค้าง 1 วินาทีระหว่างแต่ละท่า", true)) }
+                    _ui.update { it.copy(phase = Phase.RECORDING, banner = banner("เริ่มอัดแล้ว — ระหว่างท่าให้กลับมาทับเงาจนเป็นสีเขียว", true)) }
                 }
                 is VideoRecordEvent.Finalize -> onFinalized(event)
                 else -> Unit
@@ -278,7 +284,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (found.isEmpty()) {
                 withContext(Dispatchers.IO) { file.delete() }
-                _ui.update { it.copy(phase = Phase.IDLE, message = "เทคนี้ไม่พบท่าที่ใช้ได้ — ทำท่าแล้วกลับท่ากลางค้างไว้ 1 วินาที ให้แต่ละท่ายาว ${it.config.clipMinSec.toInt()}–${it.config.clipMaxSec.toInt()} วินาที") }
+                _ui.update { it.copy(phase = Phase.IDLE, message = "เทคนี้ไม่พบท่าที่ใช้ได้ — ทำท่าแล้วกลับมาทับเงาจนเป็นสีเขียว ให้แต่ละท่ายาว ${it.config.clipMinSec.toInt()}–${it.config.clipMaxSec.toInt()} วินาที") }
                 return@launch
             }
             var number = db.clips().maxNumber(s.id)
@@ -352,6 +358,9 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
 
         val cfg = _ui.value.config
         val m = matcher?.match(features)
+        val isNeutral = m?.score?.let { it >= cfg.poseMatchStart } == true
+        if (isNeutral) { if (neutralSince < 0) neutralSince = now } else neutralSince = -1
+        val heldMs = if (neutralSince >= 0) now - neutralSince else 0L
 
         var newFound: FoundSegment? = null
         var newBanner: Banner? = null
@@ -392,6 +401,8 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update {
             it.copy(
                 match = m,
+                live = features,
+                heldMs = heldMs,
                 hasFace = features.hasFace,
                 inferenceMs = inferenceMs,
                 analysisFps = measuredFps ?: it.analysisFps,

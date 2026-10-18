@@ -93,7 +93,8 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
     // Green frame around the picture while a clip is being collected.
     val frameColor by animateColorAsState(
         when {
-            ui.phase == Phase.RECORDING && ui.collecting -> Green
+            ui.heldMs > 0 -> Green
+            ui.phase == Phase.RECORDING && ui.collecting -> Green.copy(alpha = 0.45f)
             ui.phase == Phase.RECORDING -> Red.copy(alpha = 0.7f)
             else -> Color.Transparent
         },
@@ -102,14 +103,23 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView({ previewView }, Modifier.fillMaxSize())
-        if (ui.ghost && ui.reference != null && !recording) {
+        // Neutral-pose ghost, shown while recording too: a faint picture plus an
+        // outline that turns green as the live pose (white lines) matches it.
+        if (ui.ghost && ui.reference != null) {
             Image(
                 ui.reference!!.asImageBitmap(), null,
-                Modifier.fillMaxSize().graphicsLayer { alpha = 0.3f; scaleX = if (front) -1f else 1f },
+                Modifier.fillMaxSize().graphicsLayer { alpha = if (recording) 0.15f else 0.28f; scaleX = if (front) -1f else 1f },
                 contentScale = ContentScale.Fit,
             )
         }
-        Box(Modifier.fillMaxSize().border(4.dp, frameColor))
+        if (ui.ghost && ui.refFeatures != null) {
+            val ghostColor by animateColorAsState(scoreColor(ui.match?.score, ui.config.poseMatchStart), label = "ghost")
+            GhostOverlay(
+                reference = ui.refFeatures, live = ui.live, color = ghostColor, mirror = front,
+                minVisibility = ui.config.minLandmarkVisibility, modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(Modifier.fillMaxSize().border(if (ui.heldMs > 0) 8.dp else 4.dp, frameColor))
 
         // Top scrim + HUD
         Column(
@@ -152,7 +162,7 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
             AnimatedContent(ui.cue.takeIf { recording }, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "cue") { cue ->
                 if (cue != null) {
                     Text(
-                        if (ui.collecting) "ทำท่า: $cue\nแล้วกลับท่ากลางค้างไว้" else "กลับท่ากลางค้าง 1 วินาทีเพื่อเริ่มท่าใหม่",
+                        if (ui.collecting) "ทำท่า: $cue\nแล้วกลับมาทับเงาจนเป็นสีเขียว" else "ทับเงาจนเป็นสีเขียวค้างไว้ เพื่อเริ่มท่าใหม่",
                         color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
@@ -219,15 +229,7 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
 private fun ScorePill(ui: StudioUi) {
     val score = ui.match?.score
     val threshold = ui.config.poseMatchStart
-    val color by animateColorAsState(
-        when {
-            score == null -> Color.Gray
-            score >= threshold -> Green
-            score >= threshold - 25 -> Amber
-            else -> Red
-        },
-        label = "score",
-    )
+    val color by animateColorAsState(scoreColor(score, threshold), label = "score")
     val progress by animateFloatAsState((score ?: 0f) / 100f, label = "progress")
     Column {
         Row(
@@ -250,6 +252,29 @@ private fun ScorePill(ui: StudioUi) {
                 Box(Modifier.fillMaxWidth(progress).height(4.dp).background(color))
             }
         }
+        // Hold timer: fills while the neutral pose is held.
+        if (ui.refFeatures != null) {
+            val target = if (ui.phase == Phase.RECORDING && ui.collecting) ui.config.neutralHoldEndMs else ui.config.neutralHoldStartMs
+            val hold = (ui.heldMs.toFloat() / target).coerceIn(0f, 1f)
+            val holdAnim by animateFloatAsState(hold, label = "hold")
+            val hint = poseHint(ui)
+            if (ui.heldMs > 0 || hint != null) {
+                Row(
+                    Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Glass).padding(horizontal = 12.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (ui.heldMs > 0) {
+                        Text(if (hold >= 1f) "ตรงแล้ว ✓" else "ค้างไว้…", color = Green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.width(90.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.2f))) {
+                            Box(Modifier.fillMaxWidth(holdAnim).height(6.dp).background(Green))
+                        }
+                    } else if (hint != null) {
+                        Text(hint, color = Color.White, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
         val warns = ui.match?.warnings.orEmpty()
         if (warns.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
@@ -262,6 +287,27 @@ private fun ScorePill(ui: StudioUi) {
             }
         }
     }
+}
+
+private fun scoreColor(score: Float?, threshold: Float): Color = when {
+    score == null -> Color.Gray
+    score >= threshold -> Green
+    score >= threshold - 20 -> Amber
+    else -> Red
+}
+
+/** Which part of the body is furthest from the neutral pose, as a short instruction. */
+private fun poseHint(ui: StudioUi): String? {
+    val m = ui.match ?: return null
+    val score = m.score ?: return null
+    if (score >= ui.config.poseMatchStart) return null
+    val parts = listOfNotNull(
+        m.face?.let { it to "ขยับหัวให้ตรงเงา" },
+        m.headAngle?.let { it to "หันหน้าให้ตรงเหมือนเงา" },
+        m.shoulders?.let { it to "ปรับไหล่ให้ตรงเส้นเงา" },
+        m.hands?.let { it to "วางมือตามเงา" },
+    )
+    return "เส้นขาว → ทับเงา · " + (parts.minByOrNull { it.first }?.second ?: "")
 }
 
 @Composable
@@ -411,7 +457,7 @@ private fun SetupPanel(ui: StudioUi, vm: StudioViewModel, onClose: () -> Unit) {
                 ui.lockNotes.forEach { Text("• $it", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp) }
             }
             Text(
-                "วิธีถ่าย: กดอัด → ทำท่าไปเรื่อยๆ แต่ละท่า ${ui.config.clipMinSec.toInt()}–${ui.config.clipMaxSec.toInt()} วินาที แล้วกลับท่ากลางค้าง 1 วินาที " +
+                "วิธีถ่าย: กดอัด → ทำท่าไปเรื่อยๆ แต่ละท่า ${ui.config.clipMinSec.toInt()}–${ui.config.clipMaxSec.toInt()} วินาที แล้วกลับมาทับเงาจนเป็นสีเขียวค้างไว้ครู่หนึ่ง " +
                     "แอปจะตัดท่าที่ใช้ได้ให้เองและแจ้งทุกครั้ง กดหยุดเมื่อพอใจ",
                 color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
             )
