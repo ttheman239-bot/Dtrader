@@ -74,6 +74,10 @@ data class StudioUi(
     val tag: String = "calm",
     /** True while the user is back in neutral and a clip is being collected. */
     val collecting: Boolean = false,
+    /** How much of the current clip has been collected (ms since its possible start), or null. */
+    val collectedMs: Long? = null,
+    /** Recent errors (time, message, location) for the diagnostics panel. */
+    val errors: List<String> = emptyList(),
     val found: List<FoundSegment> = emptyList(),
     val banner: Banner? = null,
     val cutProgress: Pair<Int, Int>? = null,
@@ -267,6 +271,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (e: Throwable) {
             Log.e(TAG, "record event", e)
+            logError("อัดวิดีโอ", e)
             _ui.update { it.copy(phase = Phase.IDLE, message = "ผิดพลาดระหว่างอัด: ${e.message ?: e}") }
         }
     }
@@ -324,6 +329,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 ok++
             } catch (e: Throwable) {
                 Log.e(TAG, "export failed", e)
+                logError("ตัดคลิป", e)
                 db.clips().update(clip.copy(exportStatus = "FAILED", exportError = e.message ?: e.toString()))
             }
         }
@@ -343,7 +349,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             onFrame(features, bitmap, inferenceMs)
         } catch (e: Throwable) {
             Log.e(TAG, "frame", e)
-            _ui.update { it.copy(message = "การวิเคราะห์ผิดพลาด: ${e.message ?: e}") }
+            logError("วิเคราะห์ภาพ", e)
         }
     }
 
@@ -365,6 +371,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         var newFound: FoundSegment? = null
         var newBanner: Banner? = null
         var cue: String? = _ui.value.cue
+        var collectedMs: Long? = null
         var elapsed = _ui.value.elapsedMs
         val start = recordStartElapsed
         val seg = segmenter
@@ -389,9 +396,10 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                         true,
                     )
                 }
-                is Segmenter.Event.Rejected -> newBanner = banner("ไม่ใช้ท่านี้: ${ev.reasons.first()}", false)
+                is Segmenter.Event.Rejected -> newBanner = banner("ยังไม่ได้ท่า: ${ev.reasons.first()}", false)
                 null -> Unit
             }
+            collectedMs = seg.collectingSince(t)?.let { t - it }
             if (now >= nextCueAt) {
                 cue = Instructions.next(_ui.value.tag, lastCue).also { lastCue = it }
                 nextCueAt = now + (cfg.cueIntervalSec * 1000).toLong()
@@ -408,7 +416,8 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 analysisFps = measuredFps ?: it.analysisFps,
                 elapsedMs = elapsed,
                 cue = cue,
-                collecting = seg?.anchorMs != null && it.phase == Phase.RECORDING,
+                collecting = collectedMs != null && it.phase == Phase.RECORDING,
+                collectedMs = if (it.phase == Phase.RECORDING) collectedMs else null,
                 found = newFound?.let { f -> it.found + f } ?: it.found,
                 banner = newBanner ?: it.banner,
             )
@@ -416,6 +425,14 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun banner(text: String, good: Boolean) = Banner(++bannerSeq, text, good)
+
+    /** Keeps the last few errors (with where they happened) for the ⚙ panel. */
+    private fun logError(where: String, e: Throwable) {
+        val at = e.stackTrace.firstOrNull { it.className.startsWith("com.dtrader") } ?: e.stackTrace.firstOrNull()
+        val line = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())} $where: " +
+            "${e.javaClass.simpleName}: ${e.message}" + (at?.let { " @ ${it.fileName}:${it.lineNumber}" } ?: "")
+        _ui.update { it.copy(errors = (it.errors + line).takeLast(6)) }
+    }
 
     override fun onCleared() {
         rig.unbind()

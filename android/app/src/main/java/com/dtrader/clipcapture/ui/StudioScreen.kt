@@ -159,15 +159,7 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
         ) {
             ui.message?.let { MessageCard(it, vm::clearMessage) }
             if (!ready && !recording) SetupSteps(ui, vm)
-            AnimatedContent(ui.cue.takeIf { recording }, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "cue") { cue ->
-                if (cue != null) {
-                    Text(
-                        if (ui.collecting) "ทำท่า: $cue\nแล้วกลับมาทับเงาจนเป็นสีเขียว" else "ทับเงาจนเป็นสีเขียวค้างไว้ เพื่อเริ่มท่าใหม่",
-                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                }
-            }
+            if (ui.phase == Phase.RECORDING) CollectHud(ui)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
                     PillButton("คลัง ${ui.clipCount}", enabled = !recording && ui.phase != Phase.CUTTING, onClick = onLibrary)
@@ -284,6 +276,44 @@ private fun ScorePill(ui: StudioUi) {
                         modifier = Modifier.clip(RoundedCornerShape(50)).background(Red.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Big live guide while recording: how much of the current clip is collected. */
+@Composable
+private fun CollectHud(ui: StudioUi) {
+    val minMs = ui.config.clipMinSec * 1000
+    val maxMs = ui.config.clipMaxSec * 1000
+    val c = ui.collectedMs
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(18.dp)).background(Glass).padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when {
+            c == null -> {
+                Text("ทับเงาให้เป็นสีเขียว ค้างไว้ครู่หนึ่ง", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text("แล้วเริ่มทำท่าได้เลย", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            }
+            else -> {
+                val enough = c >= minMs
+                val p by animateFloatAsState((c / maxMs).coerceIn(0f, 1f), label = "collect")
+                Text(
+                    "%.1f วินาที".format(c / 1000f),
+                    color = if (enough) Green else Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                )
+                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = 0.18f))) {
+                    Box(Modifier.fillMaxWidth(p).height(10.dp).background(if (enough) Green else Amber))
+                    // Marker at clip_min_sec.
+                    Box(Modifier.fillMaxWidth(minMs / maxMs).height(10.dp)) {
+                        Box(Modifier.align(Alignment.CenterEnd).width(2.dp).height(10.dp).background(Color.White))
+                    }
+                }
+                Text(
+                    if (enough) "ครบแล้ว! กลับมาทับเงาได้เลย" else "ทำท่าต่อ: ${ui.cue ?: ""}",
+                    color = if (enough) Green else Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                )
             }
         }
     }
@@ -452,6 +482,10 @@ private fun SetupPanel(ui: StudioUi, vm: StudioViewModel, onClose: () -> Unit) {
             Info("ซูม", ui.zoom?.let { "%.2f×".format(it) } ?: "—")
             Info("โมเดล", ui.delegates.ifEmpty { "—" })
             Info("วิเคราะห์", "%.1f fps · %d ms ต่อเฟรม".format(ui.analysisFps, ui.inferenceMs))
+            if (ui.errors.isNotEmpty()) {
+                Text("ข้อผิดพลาดล่าสุด (ส่งให้ผู้พัฒนาได้)", color = Red, fontSize = 13.sp)
+                ui.errors.forEach { Text("• $it", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp) }
+            }
             if (ui.lockNotes.isNotEmpty()) {
                 Text("รายละเอียดการล็อก", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
                 ui.lockNotes.forEach { Text("• $it", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp) }

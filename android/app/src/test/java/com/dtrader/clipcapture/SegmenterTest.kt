@@ -36,9 +36,24 @@ class SegmenterTest {
         assertTrue("end=${f.endMs}", f.endMs in 13_400..13_600)
     }
 
-    @Test fun rejectsTooShort() {
+    @Test fun tooShortIsSilent() {
+        // Returning to neutral before clip_min_sec is not an error; nothing is reported.
         val ev = run(8_000, score = neutralMoveNeutral(1_500, 4_500))
-        assertTrue(ev.single() is Segmenter.Event.Rejected)
+        assertTrue(ev.isEmpty())
+    }
+
+    @Test fun passingThroughNeutralDoesNotBreakClip() {
+        val score: (Long) -> Float = { t ->
+            when (t) {
+                in 1_500 until 6_000 -> 40f
+                in 6_000 until 6_900 -> 95f // brief neutral in the middle of the move
+                in 6_900 until 13_000 -> 35f
+                else -> 95f
+            }
+        }
+        val ev = run(15_000, score = score)
+        val f = ev.single() as Segmenter.Event.Found
+        assertEquals(1_400L, f.startMs)
     }
 
     @Test fun rejectsWithoutRealMovement() {
