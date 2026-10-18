@@ -15,11 +15,14 @@ android {
         applicationId = "com.dtrader.clipcapture"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     // MediaPipe memory-maps its .task models, so they must be stored uncompressed.
     androidResources { noCompress += "task" }
@@ -79,6 +82,7 @@ dependencies {
     implementation("androidx.media3:media3-transformer:$media3")
     implementation("androidx.media3:media3-effect:$media3")
     implementation("androidx.media3:media3-common:$media3")
+    implementation("androidx.media3:media3-exoplayer:$media3")
 
     val room = "2.6.1"
     implementation("androidx.room:room-runtime:$room")

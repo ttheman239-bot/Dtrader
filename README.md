@@ -14,8 +14,8 @@
 | **M2** | MediaPipe face(blendshapes)/pose/hand real-time, Pose Match Score, ghost overlay, auto start/stop, เตือนปากเปิด/มือบังปาก/หน้าหลุดเฟรม, QC เบื้องต้นหลังถ่าย | ✅ ทำแล้ว (รอทดสอบบนเครื่องจริง) |
 | M3 | QC ทุกเฟรม, loop points, export normalized clip (trim + 25 fps CFR) | บางส่วน: ตัดคลิปอัตโนมัติ + export trim/25 fps/no audio/keyframe 1s แล้ว; QC แบบถอดรหัสทุกเฟรมและเลือกเฟรมตัดที่นิ่งที่สุดยังไม่ทำ |
 | M4 | Alignment + color normalization | ยังไม่ทำ |
-| M5 | Transition matrix + Sequence Preview + manual override | ยังไม่ทำ — หน้าจอแสดง “ยังไม่รองรับ” |
-| M6 | Clip Package + manifest + Share / LAN upload | ยังไม่ทำ — หน้าจอแสดง “ยังไม่รองรับ” |
+| M5 | Transition matrix + Sequence Preview + manual override | ทำแล้ว (ยกเว้น manual override): heatmap จากเฟรมแรก/สุดท้ายของทุกคลิป, เล่นต่อเนื่องด้วย ExoPlayer 2 ตัว + crossfade, จำลองการพูดด้วย TTS (พูด → คลิป active, เงียบ → calm); lip-sync ยังไม่รองรับ |
+| M6 | Clip Package + manifest + Share / LAN upload | ทำแล้ว: .zip (clips, reference, manifest.json พร้อม QC และ transition matrix) + แชร์; LAN upload ยังไม่รองรับ |
 | M7 | โหมดเทคยาว ตัดอัตโนมัติ | ✅ เป็นโหมดถ่ายหลักแล้ว (ตัดจากการวิเคราะห์สด) |
 
 ตามกฎ §10 ต้องรันผ่านบนเครื่องจริงก่อนไป M3 — ค่าเริ่มต้นใน Settings (§8) ยังต้องจูนกับวิดีโอจริง

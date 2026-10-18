@@ -13,7 +13,8 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 
 /**
  * MediaPipe Face (with blendshapes + transformation matrix), Pose and Hand
- * landmarkers in VIDEO mode. Each model tries the GPU delegate first and falls
+ * landmarkers, in VIDEO mode for the camera or IMAGE mode for still frames.
+ * Each model tries the GPU delegate first and falls
  * back to CPU. Not thread-safe: call [detect] from one thread only.
  */
 class Landmarkers private constructor(
@@ -21,6 +22,7 @@ class Landmarkers private constructor(
     private val pose: PoseLandmarker,
     private val hands: HandLandmarker,
     val delegates: String,
+    private val video: Boolean,
 ) : AutoCloseable {
 
     private var lastTs = -1L
@@ -33,9 +35,9 @@ class Landmarkers private constructor(
         // still needs it (e.g. to save the neutral-pose reference). GC frees it.
         val image = BitmapImageBuilder(bitmap).build()
         return run {
-            val f = face.detectForVideo(image, ts)
-            val p = pose.detectForVideo(image, ts)
-            val h = hands.detectForVideo(image, ts)
+            val f = if (video) face.detectForVideo(image, ts) else face.detect(image)
+            val p = if (video) pose.detectForVideo(image, ts) else pose.detect(image)
+            val h = if (video) hands.detectForVideo(image, ts) else hands.detect(image)
 
             val faceLm = f.faceLandmarks().firstOrNull()
             val faceXy = faceLm?.let { lm -> FloatArray(lm.size * 2).also { a -> lm.forEachIndexed { i, l -> a[i * 2] = l.x(); a[i * 2 + 1] = l.y() } } }
@@ -71,14 +73,16 @@ class Landmarkers private constructor(
     companion object {
         private const val TAG = "Landmarkers"
 
-        fun create(context: Context, useGpu: Boolean): Landmarkers {
+        /** [video] = live camera stream (tracking between frames); false = unrelated still frames. */
+        fun create(context: Context, useGpu: Boolean, video: Boolean = true): Landmarkers {
+            val mode = if (video) RunningMode.VIDEO else RunningMode.IMAGE
             val used = mutableListOf<String>()
             val face = withFallback("face", used, useGpu) { d ->
                 FaceLandmarker.createFromOptions(
                     context,
                     FaceLandmarker.FaceLandmarkerOptions.builder()
                         .setBaseOptions(base("models/face_landmarker.task", d))
-                        .setRunningMode(RunningMode.VIDEO)
+                        .setRunningMode(mode)
                         .setNumFaces(1)
                         .setOutputFaceBlendshapes(true)
                         .setOutputFacialTransformationMatrixes(true)
@@ -90,7 +94,7 @@ class Landmarkers private constructor(
                     context,
                     PoseLandmarker.PoseLandmarkerOptions.builder()
                         .setBaseOptions(base("models/pose_landmarker_lite.task", d))
-                        .setRunningMode(RunningMode.VIDEO)
+                        .setRunningMode(mode)
                         .setNumPoses(1)
                         .build(),
                 )
@@ -100,12 +104,12 @@ class Landmarkers private constructor(
                     context,
                     HandLandmarker.HandLandmarkerOptions.builder()
                         .setBaseOptions(base("models/hand_landmarker.task", d))
-                        .setRunningMode(RunningMode.VIDEO)
+                        .setRunningMode(mode)
                         .setNumHands(2)
                         .build(),
                 )
             }
-            return Landmarkers(face, pose, hands, used.joinToString(", "))
+            return Landmarkers(face, pose, hands, used.joinToString(", "), video)
         }
 
         private fun base(path: String, delegate: Delegate) =

@@ -168,9 +168,13 @@ fun SessionMenuScreen(sessionId: Long, onNavigate: (String) -> Unit, onBack: () 
             Text("คลิปทั้งหมด ${clips.size} · ตัดแล้ว $cut", fontSize = 14.sp)
             MenuButton("ถ่าย (อัดต่อเนื่อง ตัดท่าอัตโนมัติ)", "") { onNavigate("studio") }
             MenuButton("คลังคลิป (Library)", "") { onNavigate("library") }
-            MenuButton("Transitions (heatmap)", "M5 · ยังไม่รองรับ") { onNavigate("transitions") }
-            MenuButton("Sequence Preview", "M5 · ยังไม่รองรับ") { onNavigate("preview") }
-            MenuButton("Export Clip Package", "M6 · ยังไม่รองรับ") { onNavigate("export") }
+            MenuButton("Transitions (heatmap)", if (cut >= 2) "ดูว่าคลิปไหนต่อกันได้" else "ต้องมี 2 คลิปขึ้นไป") { onNavigate("transitions") }
+            MenuButton("Sequence Preview + จำลองการพูด", if (cut >= 1) "เล่นต่อเนื่อง + เสียงพูด" else "ยังไม่มีคลิป") { onNavigate("preview") }
+            MenuButton("Export Clip Package", if (cut >= 1) ".zip + manifest" else "ยังไม่มีคลิป") { onNavigate("export") }
+            Text(
+                "ยังไม่รองรับ: จัดตำแหน่ง/ปรับสีให้ตรงกัน (M4), หาจุดวนคลิปแบบละเอียดทุกเฟรม (M3), lip-sync ปากตามเสียง",
+                fontSize = 12.sp, color = Color.Gray,
+            )
         }
     }
 }

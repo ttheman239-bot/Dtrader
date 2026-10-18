@@ -34,13 +34,15 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dtrader.clipcapture.capture.StudioViewModel
 import com.dtrader.clipcapture.data.AppDatabase
+import com.dtrader.clipcapture.ui.ExportScreen
 import com.dtrader.clipcapture.ui.LibraryScreen
-import com.dtrader.clipcapture.ui.NotSupportedScreen
 import com.dtrader.clipcapture.ui.ScreenScaffold
+import com.dtrader.clipcapture.ui.SequencePreviewScreen
 import com.dtrader.clipcapture.ui.SessionMenuScreen
 import com.dtrader.clipcapture.ui.SessionsScreen
 import com.dtrader.clipcapture.ui.SettingsScreen
 import com.dtrader.clipcapture.ui.StudioScreen
+import com.dtrader.clipcapture.ui.TransitionsScreen
 
 /** Simple back stack of routes: "sessions", "settings", "<route>/<sessionId>". */
 class MainActivity : ComponentActivity() {
@@ -71,9 +73,9 @@ private fun App(activity: ComponentActivity) {
         "menu" -> SessionMenuScreen(sessionId, onNavigate = { push("$it/$sessionId") }, onBack = pop)
         "studio" -> CameraGate(activity, onBack = pop) { StudioRoute(activity, sessionId, onLibrary = { push("library/$sessionId") }, onBack = pop) }
         "library" -> LibraryScreen(sessionId, onBack = pop)
-        "transitions" -> NotSupportedScreen("Transitions", "M5", "จะคำนวณ transition matrix จากจุดตัดของทุกคลิป (ต้องมี M3 ก่อน) แล้วแสดงเป็น heatmap", pop)
-        "preview" -> NotSupportedScreen("Sequence Preview", "M5", "จะเล่นสุ่มต่อเนื่องด้วย ExoPlayer สองตัว + crossfade ตาม transition matrix (ตอนนี้เปิดดูทีละคลิปได้ในคลัง)", pop)
-        "export" -> NotSupportedScreen("Export", "M6", "จะสร้าง Clip Package (.zip) พร้อม manifest.json และส่งผ่าน Share / LAN upload", pop)
+        "transitions" -> TransitionsScreen(sessionId, onBack = pop)
+        "preview" -> SequencePreviewScreen(sessionId, onBack = pop)
+        "export" -> ExportScreen(sessionId, onBack = pop)
     }
 }
 

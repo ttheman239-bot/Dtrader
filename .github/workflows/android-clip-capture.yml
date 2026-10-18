@@ -58,7 +58,7 @@ jobs:
           name: "Clip Capture ${{ steps.apk.outputs.tag }}"
           prerelease: true
           body: |
-            ## Clip Capture (M1–M2)
+            ## Clip Capture (M1–M2, M5–M6)
 
             Download `${{ steps.apk.outputs.path }}` on the phone, open it and allow installs from unknown sources.
 
