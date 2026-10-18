@@ -3,8 +3,6 @@ package com.dtrader.clipcapture.ui
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -59,6 +57,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import com.dtrader.clipcapture.config.ConfigStore
 import com.dtrader.clipcapture.data.AppDatabase
+import com.dtrader.clipcapture.lipsync.LipSync
+import com.dtrader.clipcapture.lipsync.MouthLibrary
+import com.dtrader.clipcapture.lipsync.MouthTrack
+import com.dtrader.clipcapture.lipsync.MouthTracks
+import com.dtrader.clipcapture.lipsync.SpeechPlayer
+import com.dtrader.clipcapture.vision.SessionFiles
+import kotlinx.coroutines.Job
 import com.dtrader.clipcapture.sequence.ClipGraph
 import com.dtrader.clipcapture.sequence.PackageExporter
 import com.dtrader.clipcapture.sequence.SequenceEngine
@@ -67,7 +72,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
 private val Good = Color(0xFF22C55E)
 private val Mid = Color(0xFFF59E0B)
@@ -253,7 +257,7 @@ fun SequencePreviewScreen(sessionId: Long, onBack: () -> Unit) {
     val context = LocalContext.current
     val session by remember { AppDatabase.get(context).sessions().observe(sessionId) }.collectAsState(initial = null)
     ScreenScaffold("Sequence Preview", onBack) {
-        GraphGate(state, minClips = 1) { g -> PreviewContent(g, session?.portrait ?: true) }
+        GraphGate(state, minClips = 1) { g -> PreviewContent(sessionId, g, session?.portrait ?: true) }
     }
 }
 
@@ -262,67 +266,92 @@ private const val DEFAULT_SCRIPT =
         "วันนี้เรามีสินค้าดี ๆ มาแนะนำหลายอย่างเลย\n" +
         "ใครสนใจตัวไหน พิมพ์ถามในแชทได้เลยครับ"
 
+/** Mouth library + per-clip tracks, built on demand and cached on disk. */
+private sealed class MouthState {
+    data object Checking : MouthState()
+    data object NoTake : MouthState()
+    data object NeedLibrary : MouthState()
+    data class Working(val text: String, val done: Int, val total: Int) : MouthState()
+    data class Ready(val library: MouthLibrary, val tracks: Map<Int, MouthTrack>) : MouthState()
+    data class Failed(val message: String) : MouthState()
+}
+
 @Composable
-private fun PreviewContent(g: ClipGraph, portrait: Boolean) {
+private fun PreviewContent(sessionId: Long, g: ClipGraph, portrait: Boolean) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val files = remember(sessionId) { SessionFiles(context, sessionId) }
     var speaking by remember { mutableStateOf(false) }
     var subtitle by remember { mutableStateOf<String?>(null) }
     var script by remember { mutableStateOf(DEFAULT_SCRIPT) }
     var paused by remember { mutableStateOf(false) }
     var ttsStatus by remember { mutableStateOf("กำลังเตรียมเสียงพูด…") }
     var ttsReady by remember { mutableStateOf(false) }
+    var speechJob by remember { mutableStateOf<Job?>(null) }
+    var preparing by remember { mutableStateOf(false) }
+    var mouth by remember { mutableStateOf<MouthState>(MouthState.Checking) }
+    var mouthOn by remember { mutableStateOf(true) }
     val log = remember { mutableStateListOf<String>() }
     var nowPlaying by remember { mutableStateOf("") }
 
+    val speech = remember { SpeechPlayer(context) { text, ok -> ttsStatus = text; ttsReady = ok } }
+    DisposableEffect(speech) { onDispose { speech.release() } }
+
+    val lip = (mouth as? MouthState.Ready)?.let { m -> remember(m) { LipSync(m.library, m.tracks, speech) } }
+    val lipRef = remember { arrayOfNulls<LipSync>(1) }
+    lipRef[0] = lip?.takeIf { mouthOn }
+
     val planner = remember(g) { SequencePlanner(g.matrix, g.clips.map { it.tag }, g.config) }
     val engine = remember(g) {
-        SequenceEngine(context, g, planner, preferTag = { if (speaking) "active" else "calm" }) { cut ->
-            nowPlaying = "clip ${g.label(cut.to)} · ${g.clips[cut.to].tag}"
-            cut.step?.let { s ->
-                val line = "${g.label(cut.from!!)} → ${g.label(cut.to)} · " +
-                    (if (s.cost.isNaN()) "cost —" else "cost %.2f".format(s.cost)) + " · ${s.crossfadeFrames} เฟรม" +
-                    (if (s.forced) " · ⚠ ไม่มีคู่ที่ผ่านเกณฑ์" else "")
-                log.add(0, line)
-                if (log.size > 8) log.removeAt(log.lastIndex)
-            }
-        }
+        SequenceEngine(
+            context, g, planner,
+            preferTag = { if (speech.speaking) "active" else "calm" },
+            onCut = { cut ->
+                nowPlaying = "clip ${g.label(cut.to)} · ${g.clips[cut.to].tag}"
+                cut.step?.let { s ->
+                    val line = "${g.label(cut.from!!)} → ${g.label(cut.to)} · " +
+                        (if (s.cost.isNaN()) "cost —" else "cost %.2f".format(s.cost)) + " · ${s.crossfadeFrames} เฟรม" +
+                        (if (s.forced) " · ⚠ ไม่มีคู่ที่ผ่านเกณฑ์" else "")
+                    log.add(0, line)
+                    if (log.size > 8) log.removeAt(log.lastIndex)
+                }
+            },
+            lipSync = { lipRef[0] },
+        )
     }
     DisposableEffect(engine) {
         engine.start()
         onDispose { engine.release() }
     }
     LaunchedEffect(engine) {
-        while (true) withFrameMillis { engine.tick(it) }
+        while (true) withFrameMillis {
+            engine.tick(it)
+            speaking = speech.speaking
+            subtitle = speech.line
+        }
     }
 
-    // Text-to-speech: the "speaking" state steers the planner to active clips.
-    val tts = remember { arrayOfNulls<TextToSpeech>(1) }
-    DisposableEffect(Unit) {
-        var t: TextToSpeech? = null
-        t = TextToSpeech(context.applicationContext) { status ->
-            val engineTts = t ?: return@TextToSpeech
-            if (status != TextToSpeech.SUCCESS) { ttsStatus = "เปิดระบบเสียงพูด (TTS) ของเครื่องไม่ได้"; return@TextToSpeech }
-            val r = engineTts.setLanguage(Locale("th", "TH"))
-            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                ttsStatus = "เครื่องไม่มีเสียงภาษาไทย — ติดตั้ง/เลือก \"Google Speech Services\" และดาวน์โหลดภาษาไทยในการตั้งค่า Text-to-speech"
-            } else {
-                ttsStatus = "พร้อมพูด (${engineTts.defaultEngine})"
-                ttsReady = true
-            }
-            engineTts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(id: String) {
-                    if (id.startsWith("say")) { speaking = true; subtitle = script.lines().filter { it.isNotBlank() }.getOrNull(id.removePrefix("say").toInt()) }
-                }
-                override fun onDone(id: String) {
-                    if (id.startsWith("say")) { speaking = false; subtitle = null }
-                }
-                @Deprecated("Deprecated in Java")
-                override fun onError(id: String) { speaking = false; subtitle = null }
-                override fun onStop(id: String, interrupted: Boolean) { speaking = false; subtitle = null }
-            })
+    // Load the mouth library if there is one, then make sure every clip has a mouth track.
+    suspend fun prepareTracks(library: MouthLibrary) {
+        val tracks = HashMap<Int, MouthTrack>()
+        val todo = g.clips.indices.filter { MouthTracks.loadCached(File(g.clips[it].clipPath!!))?.also { t -> tracks[it] = t } == null }
+        todo.forEachIndexed { k, i ->
+            mouth = MouthState.Working("กำลังหาตำแหน่งปากในคลิป ${g.label(i)}", k, todo.size)
+            tracks[i] = withContext(Dispatchers.Default) { MouthTracks.build(context, File(g.clips[i].clipPath!!)) }
         }
-        tts[0] = t
-        onDispose { t?.stop(); t?.shutdown() }
+        mouth = MouthState.Ready(library, tracks)
+    }
+    LaunchedEffect(files) {
+        mouth = try {
+            val lib = withContext(Dispatchers.IO) { MouthLibrary.load(files) }
+            when {
+                lib != null -> { prepareTracks(lib); mouth }
+                withContext(Dispatchers.IO) { files.speechTake.exists() } -> MouthState.NeedLibrary
+                else -> MouthState.NoTake
+            }
+        } catch (e: Throwable) {
+            MouthState.Failed("${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -350,22 +379,28 @@ private fun PreviewContent(g: ClipGraph, portrait: Boolean) {
 
         Text("จำลองการพูด", fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Text(
-            "พิมพ์บท (บรรทัดละประโยค) แล้วกดพูด: ระหว่างพูดจะเลือกคลิป active (ขยับมือ) ช่วงเงียบจะเลือกคลิป calm " +
-                "· ปากในคลิปยังไม่ขยับตามเสียง — lip-sync ต้องใช้โมเดลแยก (ยังไม่รองรับ)",
+            "พิมพ์บท (บรรทัดละประโยค) แล้วกดพูด: ระหว่างพูดจะเลือกคลิป active ช่วงเงียบจะเลือกคลิป calm และถ้ามีคลังปาก จะใส่ปากจริงของคุณให้ขยับตามเสียง",
             fontSize = 12.sp, color = Color.Gray,
         )
         OutlinedTextField(script, { script = it }, modifier = Modifier.fillMaxWidth().height(140.dp), label = { Text("บทพูด") })
         Text(ttsStatus, fontSize = 12.sp, color = if (ttsReady) Good else Mid)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = ttsReady, onClick = {
-                val t = tts[0] ?: return@Button
-                t.stop()
-                script.lines().filter { it.isNotBlank() }.forEachIndexed { k, line ->
-                    t.speak(line.trim(), TextToSpeech.QUEUE_ADD, null, "say$k")
-                    t.playSilentUtterance(1500, TextToSpeech.QUEUE_ADD, "gap$k")
+            Button(enabled = ttsReady && !preparing, onClick = {
+                speechJob?.cancel()
+                val lines = script.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                speechJob = scope.launch {
+                    try {
+                        preparing = true
+                        val rendered = try { speech.prepare(lines) } finally { preparing = false }
+                        speech.play(rendered, gapMs = 1200)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        ttsStatus = "พูดไม่สำเร็จ: ${e.message}"
+                    }
                 }
-            }) { Text("▶ พูด") }
-            OutlinedButton(enabled = ttsReady, onClick = { tts[0]?.stop(); speaking = false; subtitle = null }) { Text("หยุดพูด") }
+            }) { Text(if (preparing) "กำลังสร้างเสียง…" else "▶ พูด") }
+            OutlinedButton(onClick = { speechJob?.cancel(); speechJob = null }) { Text("หยุดพูด") }
             OutlinedButton(onClick = {
                 runCatching { context.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                     .onFailure { ttsStatus = "เปิดหน้าตั้งค่าเสียงไม่ได้ — ไปที่ ตั้งค่า > การจัดการทั่วไป > Text-to-speech" }
@@ -375,6 +410,50 @@ private fun PreviewContent(g: ClipGraph, portrait: Boolean) {
         }
         val tags = g.clips.groupingBy { it.tag }.eachCount()
         Text("คลิป active ${tags["active"] ?: 0} · calm ${tags["calm"] ?: 0}", fontSize = 12.sp, color = Color.Gray)
+
+        Text("ปากขยับตามเสียง (lip-sync)", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        when (val m = mouth) {
+            MouthState.Checking -> Text("กำลังตรวจคลังปาก…", fontSize = 13.sp)
+            MouthState.NoTake -> Text(
+                "ยังไม่มีคลังปาก: ไปหน้าถ่าย → เลือกโหมด \"พูด\" (ข้าง calm/active) → กดอัด แล้วพูดอะไรก็ได้ 20–30 วินาที หน้าตรงทับเงา → กดหยุด แล้วกลับมาหน้านี้",
+                fontSize = 13.sp,
+            )
+            MouthState.NeedLibrary -> Button(onClick = {
+                scope.launch {
+                    mouth = try {
+                        val lib = MouthLibrary.build(context, files, g.reference) { d, t -> mouth = MouthState.Working("กำลังตัดปากจากเทคพูด", d, t) }
+                        prepareTracks(lib)
+                        mouth
+                    } catch (e: Throwable) {
+                        MouthState.Failed(e.message ?: e.toString())
+                    }
+                }
+            }) { Text("สร้างคลังปากจากเทคพูด") }
+            is MouthState.Working -> {
+                Text("${m.text} ${m.done}/${m.total}", fontSize = 13.sp)
+                LinearProgressIndicator(progress = { if (m.total == 0) 0f else m.done.toFloat() / m.total }, modifier = Modifier.fillMaxWidth())
+                Text("ทำครั้งเดียว ครั้งต่อไปใช้ผลที่เก็บไว้", fontSize = 12.sp, color = Color.Gray)
+            }
+            is MouthState.Ready -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(mouthOn, { mouthOn = it })
+                    Text("ใส่ปาก (${m.library.samples.size} แบบ · ${m.tracks.size}/${g.clips.size} คลิป)", fontSize = 14.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    m.library.samples.take(8).forEach { s ->
+                        Image(s.bitmap.asImageBitmap(), null, Modifier.size(38.dp).clip(RoundedCornerShape(6.dp)).background(Color.DarkGray))
+                    }
+                }
+                Text(
+                    "ปากขยับตามความดังของเสียง (ยังไม่แยกสระ/พยัญชนะ) · ถ้าสีปากไม่เนียน ให้อัดเทคพูดใหม่หลัง Calibrate ในแสงเดียวกับคลิป",
+                    fontSize = 12.sp, color = Color.Gray,
+                )
+            }
+            is MouthState.Failed -> {
+                Text("สร้างคลังปากไม่สำเร็จ: ${m.message}", color = Bad, fontSize = 13.sp)
+                if (files.speechTake.exists()) OutlinedButton(onClick = { mouth = MouthState.NeedLibrary }) { Text("ลองใหม่") }
+            }
+        }
 
         Text("การตัดล่าสุด", fontWeight = FontWeight.Bold)
         if (log.isEmpty()) Text("ยังไม่มี", fontSize = 12.sp, color = Color.Gray)

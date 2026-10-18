@@ -172,7 +172,7 @@ fun SessionMenuScreen(sessionId: Long, onNavigate: (String) -> Unit, onBack: () 
             MenuButton("Sequence Preview + จำลองการพูด", if (cut >= 1) "เล่นต่อเนื่อง + เสียงพูด" else "ยังไม่มีคลิป") { onNavigate("preview") }
             MenuButton("Export Clip Package", if (cut >= 1) ".zip + manifest" else "ยังไม่มีคลิป") { onNavigate("export") }
             Text(
-                "ยังไม่รองรับ: จัดตำแหน่ง/ปรับสีให้ตรงกัน (M4), หาจุดวนคลิปแบบละเอียดทุกเฟรม (M3), lip-sync ปากตามเสียง",
+                "ยังไม่รองรับ: จัดตำแหน่ง/ปรับสีให้ตรงกัน (M4), หาจุดวนคลิปแบบละเอียดทุกเฟรม (M3), ปากแยกตามสระ/พยัญชนะ (ตอนนี้ขยับตามความดังเสียง)",
                 fontSize = 12.sp, color = Color.Gray,
             )
         }

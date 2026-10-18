@@ -177,6 +177,7 @@ fun StudioScreen(vm: StudioViewModel, onLibrary: () -> Unit, onBack: () -> Unit)
                     Row(Modifier.clip(RoundedCornerShape(50)).background(Glass)) {
                         Segment("calm", ui.tag == "calm", !recording) { vm.setTag("calm") }
                         Segment("active", ui.tag == "active", !recording) { vm.setTag("active") }
+                        Segment("พูด", ui.tag == StudioViewModel.SPEECH_TAG, !recording) { vm.setTag(StudioViewModel.SPEECH_TAG) }
                     }
                 }
             }
@@ -292,6 +293,16 @@ private fun CollectHud(ui: StudioUi) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         when {
+            ui.tag == StudioViewModel.SPEECH_TAG -> {
+                val secs = ui.elapsedMs / 1000f
+                val enough = secs >= StudioViewModel.MIN_SPEECH_SEC
+                Text("%.0f วินาที".format(secs), color = if (enough) Green else Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (enough) "พอแล้ว กดหยุดได้ (พูดยาวขึ้น = ปากหลายแบบขึ้น)"
+                    else "พูดอะไรก็ได้ เปิดปากกว้าง-แคบหลายแบบ หัวนิ่งทับเงา ไม่เอามือบังปาก",
+                    color = if (enough) Green else Color.White, fontSize = 15.sp, textAlign = TextAlign.Center,
+                )
+            }
             c == null -> {
                 Text("ทับเงาให้เป็นสีเขียว ค้างไว้ครู่หนึ่ง", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 Text("แล้วเริ่มทำท่าได้เลย", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)

@@ -240,7 +240,9 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         val file = f.take(System.currentTimeMillis())
         takeFile = file
         recordStartElapsed = 0
-        analysisExecutor.execute { segmenter = Segmenter(_ui.value.config) }
+        // A speech take is kept whole for the mouth library; no clips are cut from it.
+        val speech = u.tag == SPEECH_TAG
+        analysisExecutor.execute { segmenter = if (speech) null else Segmenter(_ui.value.config) }
         _ui.update { it.copy(phase = Phase.STARTING, found = emptyList(), elapsedMs = 0, collecting = false, cue = null) }
         try {
             recording = rig.startRecording(file) { event -> onRecordEvent(event) }
@@ -264,7 +266,8 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
                 is VideoRecordEvent.Start -> {
                     recordStartElapsed = SystemClock.elapsedRealtime()
                     nextCueAt = 0
-                    _ui.update { it.copy(phase = Phase.RECORDING, banner = banner("เริ่มอัดแล้ว — ระหว่างท่าให้กลับมาทับเงาจนเป็นสีเขียว", true)) }
+                    val text = if (_ui.value.tag == SPEECH_TAG) "เริ่มอัดแล้ว — พูดไปเรื่อย ๆ หน้าตรงทับเงา" else "เริ่มอัดแล้ว — ระหว่างท่าให้กลับมาทับเงาจนเป็นสีเขียว"
+                    _ui.update { it.copy(phase = Phase.RECORDING, banner = banner(text, true)) }
                 }
                 is VideoRecordEvent.Finalize -> onFinalized(event)
                 else -> Unit
@@ -286,6 +289,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(phase = Phase.IDLE, message = "บันทึกวิดีโอไม่สำเร็จ (error ${event.error}: ${event.cause?.message ?: ""})") }
             return
         }
+        if (_ui.value.tag == SPEECH_TAG) { keepSpeechTake(file); return }
         viewModelScope.launch {
             if (found.isEmpty()) {
                 withContext(Dispatchers.IO) { file.delete() }
@@ -308,6 +312,26 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             }
             _ui.update { it.copy(clipCount = number) }
             cutPending()
+        }
+    }
+
+    /** Keeps a speech take as the session's mouth-library source (replacing the old one). */
+    private fun keepSpeechTake(file: File) {
+        val f = files ?: return
+        viewModelScope.launch {
+            val secs = withContext(Dispatchers.IO) {
+                val r = android.media.MediaMetadataRetriever()
+                val ms = try { r.setDataSource(file.path); r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L }
+                    catch (e: Exception) { 0L } finally { r.release() }
+                ms / 1000f
+            }
+            if (secs < MIN_SPEECH_SEC) {
+                withContext(Dispatchers.IO) { file.delete() }
+                _ui.update { it.copy(phase = Phase.IDLE, message = "เทคพูดสั้นไป (%.0f วินาที) — พูดอย่างน้อย %d วินาที".format(secs, MIN_SPEECH_SEC)) }
+                return@launch
+            }
+            withContext(Dispatchers.IO) { f.replaceSpeechTake(file) }
+            _ui.update { it.copy(phase = Phase.IDLE, banner = banner("บันทึกเทคพูดแล้ว (%.0f วิ) — ไปที่ Sequence Preview เพื่อสร้างคลังปาก".format(secs), true)) }
         }
     }
 
@@ -375,6 +399,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         var elapsed = _ui.value.elapsedMs
         val start = recordStartElapsed
         val seg = segmenter
+        if (_ui.value.phase == Phase.RECORDING && start > 0 && seg == null) elapsed = now - start
         if (_ui.value.phase == Phase.RECORDING && start > 0 && seg != null) {
             // Frame capture time ≈ now − model time; good to ~0.1 s.
             val t = now - inferenceMs - start
@@ -440,7 +465,10 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         analysisExecutor.shutdown()
     }
 
-    private companion object {
-        const val TAG = "Studio"
+    companion object {
+        private const val TAG = "Studio"
+        /** Recording mode that keeps the whole take for the mouth library. */
+        const val SPEECH_TAG = "speech"
+        const val MIN_SPEECH_SEC = 15
     }
 }

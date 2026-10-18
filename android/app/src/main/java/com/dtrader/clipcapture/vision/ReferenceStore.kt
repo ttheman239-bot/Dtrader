@@ -20,6 +20,16 @@ class SessionFiles(context: Context, sessionId: Long) {
 
     fun clip(number: Int) = File(clipDir, "clip_%03d.mp4".format(number))
 
+    /** A take of the user talking, the source of the mouth library. */
+    val speechTake = File(dir, "speech_take.mp4")
+    val mouthDir: File = File(dir, "mouth").apply { mkdirs() }
+
+    fun replaceSpeechTake(take: File) {
+        mouthDir.listFiles()?.forEach { it.delete() }
+        if (speechTake.exists()) speechTake.delete()
+        if (!take.renameTo(speechTake)) { take.copyTo(speechTake, overwrite = true); take.delete() }
+    }
+
     fun saveReference(bitmap: Bitmap, features: FrameFeatures) {
         referenceImage.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         referenceData.writeText(features.toJson().toString())
