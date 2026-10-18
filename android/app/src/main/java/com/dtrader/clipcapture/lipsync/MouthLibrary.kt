@@ -82,11 +82,11 @@ class MouthLibrary(val samples: List<MouthSample>) {
                         faces++
                         val diff = reference?.let { maxOf(abs(face.yaw - it.yaw), abs(face.pitch - it.pitch), abs(face.roll - it.roll)) } ?: 0f
                         if (diff > MAX_ANGLE_DIFF) { offAngle++; return@forEach }
-                        val bin = ((face.jaw / MAX_JAW) * BINS).toInt().coerceIn(0, BINS - 1)
+                        val bin = ((face.jawOpen / MAX_JAW) * BINS).toInt().coerceIn(0, BINS - 1)
                         val list = bins[bin]
                         if (list.size >= PER_BIN && list.maxOf { it.angleDiff } <= diff) return@forEach
                         val c = cut(frame, face) ?: return@forEach
-                        list += Candidate(c.first, c.second, face.jaw, diff)
+                        list += Candidate(c.first, c.second, face.jawOpen, diff)
                         if (list.size > PER_BIN) list.remove(list.maxBy { it.angleDiff })
                     }
                 }
@@ -97,18 +97,18 @@ class MouthLibrary(val samples: List<MouthSample>) {
                     chosen.maxOf { it.jaw } < 0.2f -> error("ปากเปิดไม่กว้างพอ (สูงสุด %.2f) — อัดใหม่ พูดชัด ๆ อ้าปากให้กว้างขึ้น".format(chosen.maxOf { it.jaw }))
                 }
                 files.mouthDir.listFiles()?.forEach { it.delete() }
-                val index = JSONArray()
+                val entries = JSONArray()
                 chosen.sortedBy { it.jaw }.forEachIndexed { k, c ->
                     val name = "mouth_%02d.png".format(k)
                     File(files.mouthDir, name).outputStream().use { c.crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    index.put(JSONObject().apply {
+                    entries.put(JSONObject().apply {
                         put("file", name)
                         put("jaw", c.jaw.toDouble())
                         put("anchors", JSONArray(c.anchors.map { it.toDouble() }))
                         put("angle_diff", c.angleDiff.toDouble())
                     })
                 }
-                index(files).writeText(index.toString())
+                index(files).writeText(entries.toString())
                 MouthLibrary(chosen.sortedBy { it.jaw }.map { MouthSample(it.crop, it.anchors, it.jaw) })
             }
 
